@@ -74,7 +74,7 @@
 
 - name: Verify SSH, sudo, crictl, and static-pod path on control-plane nodes
   ansible.builtin.raw: >-
-    sudo -n true && command -v {{ crictl_path }} && test -d {{ static_pod_path }}
+    sudo -n true && command -v {{ crictl_path }} && test -d {{ static_pod_path }} && test -d /usr/local/bin
   changed_when: false
   delegate_to: "{{ item }}"
   loop: "{{ groups['control_plane'] }}"
@@ -110,7 +110,7 @@
           - ReadWriteOnce
         persistentVolumeReclaimPolicy: Retain
         hostPath:
-          path: {{ restore_host_path | quote }}
+          path: /mnt/data
   register: apply_restore_pv
   changed_when: >-
     'created' in apply_restore_pv.stdout or
@@ -167,7 +167,7 @@
       - "Kasten target is prepared. If the backup file is not present yet, run the restore action in Veeam Kasten now."
       - "Target namespace: {{ etcd_restore_namespace }}"
       - "Restore node label: {{ restore_node_label_key }}={{ restore_node_label_value }}"
-      - "Expected backup on restore node: {{ restore_host_path }}/{{ restore_snapshot_file }}"
+      - "Expected backup on restore node: /mnt/data/{{ restore_snapshot_file }}"
       - "Kanister Blueprint restore phase note follows exactly from the Kasten documentation."
       - "# This phase is not actualy performing restore of the etcd data store but is used"
       - "# to copy backup data to one of the leader nodes. It spins a pod on a leader node"
@@ -178,7 +178,7 @@
 
 - name: Verify downloaded etcd backup exists on restore node
   ansible.builtin.stat:
-    path: "{{ restore_host_path }}/{{ restore_snapshot_file }}"
+    path: "/mnt/data/{{ restore_snapshot_file }}"
   register: restored_snapshot_stat
   delegate_to: "{{ restore_node_inventory_hostname }}"
   failed_when: >-
@@ -189,5 +189,5 @@
   ansible.builtin.debug:
     msg: >-
       Prerequisites are ready. Restore node {{ restore_node_name }} has
-      {{ restore_host_path }}/{{ restore_snapshot_file }} with size
+      /mnt/data/{{ restore_snapshot_file }} with size
       {{ restored_snapshot_stat.stat.size }} bytes.

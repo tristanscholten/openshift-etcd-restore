@@ -85,8 +85,6 @@ Important variables in `inventories/prod/group_vars/all.yml`:
 ```yaml
 i_understand_this_is_destructive: false
 auto_approve_csrs: false
-restore_script_remote_path: /root/cluster-restore.sh
-restore_host_path: /mnt/data
 restore_snapshot_file: etcd-backup.db
 ```
 
@@ -166,8 +164,8 @@ Approve valid CSRs manually, then re-run the playbook.
    - requires `i_understand_this_is_destructive=true`
    - stops etcd and kube-apiserver static pods on non-restore control-plane nodes
    - moves old `/var/lib/etcd` aside on non-restore nodes
-   - copies the bundled `cluster-restore.sh` to the restore node over SSH
-   - runs `/root/cluster-restore.sh /mnt/data` on the restore node
+   - copies the bundled `cluster-restore.sh` to `/usr/local/bin/cluster-restore.sh` on the restore node over SSH
+   - runs `cluster-restore.sh /mnt/data` on the restore node
    - restarts kubelet on all control-plane nodes
 
 3. `approve_csrs`
