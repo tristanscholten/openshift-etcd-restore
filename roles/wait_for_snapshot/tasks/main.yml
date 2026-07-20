@@ -6,9 +6,9 @@
   retries: 60
   delay: 10
   until: snapshot_stat.stat.exists and snapshot_stat.stat.size | int > 0
-  when: openshift_node_name == restore_node_name
+  when: restore_node_is_current_host | bool
 
 - name: Report restored snapshot details
   ansible.builtin.debug:
     msg: "Found {{ restore_host_path }}/{{ restore_snapshot_file }} on {{ inventory_hostname }} with size {{ snapshot_stat.stat.size }} bytes."
-  when: openshift_node_name == restore_node_name
+  when: restore_node_is_current_host | bool

@@ -3,4 +3,8 @@
   hosts: control_plane
   gather_facts: false
   roles:
+    - role: restore_node_selection
+      tags:
+        - restore_node_selection
+        - restore
     - etcd_host_restore

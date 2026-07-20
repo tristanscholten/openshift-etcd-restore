@@ -29,23 +29,37 @@
   changed_when: true
 
 - name: Force etcd redeployment
-  ansible.builtin.command: "oc patch etcd cluster -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }} --type=merge"
+  ansible.builtin.command: >-
+    oc patch etcd cluster
+    -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }}
+    --type=merge
   changed_when: true
 
 - name: Force kube-apiserver redeployment
-  ansible.builtin.command: "oc patch kubeapiserver cluster -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }} --type=merge"
+  ansible.builtin.command: >-
+    oc patch kubeapiserver cluster
+    -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }}
+    --type=merge
   changed_when: true
 
 - name: Force kube-controller-manager redeployment
-  ansible.builtin.command: "oc patch kubecontrollermanager cluster -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }} --type=merge"
+  ansible.builtin.command: >-
+    oc patch kubecontrollermanager cluster
+    -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }}
+    --type=merge
   changed_when: true
 
 - name: Force kube-scheduler redeployment
-  ansible.builtin.command: "oc patch kubescheduler cluster -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }} --type=merge"
+  ansible.builtin.command: >-
+    oc patch kubescheduler cluster
+    -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }}
+    --type=merge
   changed_when: true
 
 - name: Show etcd installer progressing condition
-  ansible.builtin.command: "oc get etcd -o=jsonpath='{range .items[0].status.conditions[?(@.type==\"NodeInstallerProgressing\")]}{.reason}{\"\\n\"}{.message}{\"\\n\"}'"
+  ansible.builtin.command: >-
+    oc get etcd
+    -o=jsonpath='{range .items[0].status.conditions[?(@.type=="NodeInstallerProgressing")]}{.reason}{"\n"}{.message}{"\n"}'
   register: etcd_progress
   changed_when: false
 

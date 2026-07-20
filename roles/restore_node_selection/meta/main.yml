@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: restore_node_selection
+  namespace: openshift_etcd_restore
+  author: Tristan Scholten
+  description: Derive the OpenShift etcd restore node from inventory host variables.
+  license: MIT
+  min_ansible_version: "2.15"
+
+dependencies: []

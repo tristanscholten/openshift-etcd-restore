@@ -5,7 +5,6 @@
       - kasten_namespace | length > 0
       - etcd_namespace | length > 0
       - etcd_restore_namespace | length > 0
-      - restore_node_name | length > 0
       - restore_host_path | length > 0
       - restore_snapshot_file | length > 0
       - groups['control_plane'] | default([]) | length > 0
@@ -17,11 +16,13 @@
     inventory_control_plane_node_names: "{{ groups['control_plane'] | map('extract', hostvars, 'openshift_node_name') | list }}"
   run_once: true
 
-- name: Validate restore node is present in inventory
+- name: Validate derived restore node is present in inventory
   ansible.builtin.assert:
     that:
       - restore_node_name in inventory_control_plane_node_names
-    fail_msg: "restore_node_name={{ restore_node_name }} is not one of inventory OpenShift node names {{ inventory_control_plane_node_names }}."
+    fail_msg: >-
+      Derived restore_node_name={{ restore_node_name }} is not one of inventory
+      OpenShift node names {{ inventory_control_plane_node_names }}.
   run_once: true
 
 - name: Check required local commands
@@ -79,7 +80,9 @@
   ansible.builtin.assert:
     that:
       - (inventory_control_plane_node_names | difference(cluster_control_plane_nodes.stdout_lines)) | length == 0
-    fail_msg: "Inventory nodes missing from cluster master/control-plane set: {{ inventory_control_plane_node_names | difference(cluster_control_plane_nodes.stdout_lines) }}"
+    fail_msg: >-
+      Inventory nodes missing from cluster master/control-plane set:
+      {{ inventory_control_plane_node_names | difference(cluster_control_plane_nodes.stdout_lines) }}
   run_once: true
 
 - name: Check modified restore script exists locally

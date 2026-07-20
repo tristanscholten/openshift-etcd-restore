@@ -6,11 +6,11 @@
     fail_msg: "Refusing to run destructive etcd restore. Re-run with -e restore_i_understand_this_is_destructive=true after reading README.md."
   run_once: true
 
-- name: Validate restore node is in inventory
+- name: Validate derived restore node is in inventory
   ansible.builtin.assert:
     that:
       - restore_node_name in (groups['control_plane'] | map('extract', hostvars, 'openshift_node_name') | list)
-    fail_msg: "restore_node_name={{ restore_node_name }} is not in the control_plane inventory."
+    fail_msg: "Derived restore_node_name={{ restore_node_name }} is not in the control_plane inventory."
   run_once: true
 
 - name: Capture restore timestamp
@@ -23,7 +23,7 @@
     path: "{{ restore_host_path }}/{{ restore_snapshot_file }}"
   register: restore_snapshot_stat
   failed_when: not restore_snapshot_stat.stat.exists or restore_snapshot_stat.stat.size | int == 0
-  when: openshift_node_name == restore_node_name
+  when: restore_node_is_current_host | bool
 
 - name: Copy modified cluster restore script to restore node
   ansible.builtin.copy:
@@ -32,14 +32,14 @@
     owner: root
     group: root
     mode: '0700'
-  when: openshift_node_name == restore_node_name
+  when: restore_node_is_current_host | bool
 
 - name: Move etcd static pod manifest away on non-restore nodes
   ansible.builtin.command: "mv {{ etcd_static_pod_manifest }} /tmp/etcd-pod.yaml.{{ hostvars[groups['control_plane'][0]].restore_timestamp }}"
   args:
     removes: "{{ etcd_static_pod_manifest }}"
     creates: "/tmp/etcd-pod.yaml.{{ hostvars[groups['control_plane'][0]].restore_timestamp }}"
-  when: openshift_node_name != restore_node_name
+  when: not restore_node_is_current_host | bool
 
 - name: Wait for etcd static pod container to stop on non-restore nodes
   ansible.builtin.shell: "set -o pipefail && {{ crictl_path }} ps | grep etcd | grep -v operator"
@@ -51,14 +51,16 @@
   retries: 30
   delay: 10
   until: etcd_running.rc != 0
-  when: openshift_node_name != restore_node_name
+  when: not restore_node_is_current_host | bool
 
 - name: Move kube-apiserver static pod manifest away on non-restore nodes
-  ansible.builtin.command: "mv {{ kube_apiserver_static_pod_manifest }} /tmp/kube-apiserver-pod.yaml.{{ hostvars[groups['control_plane'][0]].restore_timestamp }}"
+  ansible.builtin.command: >-
+    mv {{ kube_apiserver_static_pod_manifest }}
+    /tmp/kube-apiserver-pod.yaml.{{ hostvars[groups['control_plane'][0]].restore_timestamp }}
   args:
     removes: "{{ kube_apiserver_static_pod_manifest }}"
     creates: "/tmp/kube-apiserver-pod.yaml.{{ hostvars[groups['control_plane'][0]].restore_timestamp }}"
-  when: openshift_node_name != restore_node_name
+  when: not restore_node_is_current_host | bool
 
 - name: Wait for kube-apiserver static pod container to stop on non-restore nodes
   ansible.builtin.shell: "set -o pipefail && {{ crictl_path }} ps | grep kube-apiserver | grep -v operator"
@@ -70,18 +72,18 @@
   retries: 30
   delay: 10
   until: apiserver_running.rc != 0
-  when: openshift_node_name != restore_node_name
+  when: not restore_node_is_current_host | bool
 
 - name: Move old etcd data directory aside on non-restore nodes
   ansible.builtin.command: "mv {{ etcd_data_dir }} /tmp/etcd.{{ hostvars[groups['control_plane'][0]].restore_timestamp }}"
   args:
     removes: "{{ etcd_data_dir }}"
     creates: "/tmp/etcd.{{ hostvars[groups['control_plane'][0]].restore_timestamp }}"
-  when: openshift_node_name != restore_node_name
+  when: not restore_node_is_current_host | bool
 
 - name: Execute modified cluster restore script on restore node
   ansible.builtin.command: "{{ restore_script_remote_path }} {{ restore_host_path }}"
-  when: openshift_node_name == restore_node_name
+  when: restore_node_is_current_host | bool
 
 - name: Restart kubelet on all control-plane nodes
   ansible.builtin.systemd:

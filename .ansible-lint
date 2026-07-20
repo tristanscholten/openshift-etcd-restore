@@ -1,0 +1,18 @@
+---
+# ansible-lint profile aligned with Red Hat CoP-style quality checks.
+profile: moderate
+
+exclude_paths:
+  - .cache/
+  - .git/
+  - files/cluster-ocp-restore.sh
+
+warn_list:
+  - experimental
+  - meta-no-tags
+
+skip_list:
+  # These roles intentionally share orchestration variables such as
+  # restore_node_name across roles/playbooks instead of treating them as
+  # private role defaults.
+  - var-naming[no-role-prefix]

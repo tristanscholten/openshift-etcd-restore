@@ -1,0 +1,28 @@
+---
+- name: Initialize restore node host list
+  ansible.builtin.set_fact:
+    __restore_node_inventory_hosts: []
+
+- name: Collect inventory hosts marked as restore node
+  ansible.builtin.set_fact:
+    __restore_node_inventory_hosts: >-
+      {{ __restore_node_inventory_hosts + [item] }}
+  loop: "{{ groups['control_plane'] | default([]) }}"
+  when: hostvars[item].openshift_etcd_restore_node | default(false) | bool
+
+- name: Validate exactly one restore node is selected in inventory
+  ansible.builtin.assert:
+    that:
+      - __restore_node_inventory_hosts | length == 1
+    fail_msg: >-
+      Set openshift_etcd_restore_node: true on exactly one host in the
+      control_plane inventory group. Current restore-node hosts:
+      {{ __restore_node_inventory_hosts }}.
+
+- name: Set derived restore node facts
+  ansible.builtin.set_fact:
+    restore_node_inventory_hostname: "{{ __restore_node_inventory_hosts[0] }}"
+    restore_node_name: >-
+      {{ hostvars[__restore_node_inventory_hosts[0]].openshift_node_name |
+         default(__restore_node_inventory_hosts[0]) }}
+    restore_node_is_current_host: "{{ inventory_hostname == __restore_node_inventory_hosts[0] }}"

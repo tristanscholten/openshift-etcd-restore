@@ -3,4 +3,8 @@
   hosts: all
   gather_facts: false
   roles:
+    - role: restore_node_selection
+      tags:
+        - restore_node_selection
+        - preflight
     - preflight

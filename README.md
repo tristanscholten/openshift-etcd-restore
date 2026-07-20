@@ -51,6 +51,7 @@ Some restore steps are deliberately left manual because they require operator ju
 │   └── post-restore.yml
 ├── roles/
 │   ├── preflight/
+│   ├── restore_node_selection/
 │   ├── kasten_restore_target/
 │   ├── wait_for_snapshot/
 │   ├── etcd_host_restore/
@@ -104,18 +105,22 @@ all:
         master-0.example.com:
           ansible_host: 10.0.0.10
           openshift_node_name: master-0.example.com
+          openshift_etcd_restore_node: true
         master-1.example.com:
           ansible_host: 10.0.0.11
           openshift_node_name: master-1.example.com
+          openshift_etcd_restore_node: false
         master-2.example.com:
           ansible_host: 10.0.0.12
           openshift_node_name: master-2.example.com
+          openshift_etcd_restore_node: false
 ```
 
-Edit `inventories/prod/group_vars/all.yml` and at minimum set:
+Set `openshift_etcd_restore_node: true` on exactly one `control_plane` host. The playbooks derive `restore_node_name` from that host's `openshift_node_name`, so the restore-node choice lives next to the host definition.
+
+Edit `inventories/prod/group_vars/all.yml` and at minimum set the restore script path if you do not use the default:
 
 ```yaml
-restore_node_name: master-0.example.com
 restore_script_local_path: files/cluster-ocp-restore.sh
 ```
 
@@ -174,7 +179,7 @@ ansible-playbook \
 
 The playbook performs the common Kasten/OpenShift host-side sequence:
 
-1. Confirms `restore_node_name` is one of the inventory control-plane hosts.
+1. Confirms exactly one inventory control-plane host has `openshift_etcd_restore_node: true`.
 2. Confirms the etcd snapshot exists on the restore node.
 3. Copies the modified `cluster-ocp-restore.sh` to the restore node.
 4. On every non-restore control-plane node:

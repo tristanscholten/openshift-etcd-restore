@@ -1,0 +1,10 @@
+---
+argument_specs:
+  main:
+    short_description: Select the OpenShift etcd restore node from inventory.
+    description:
+      - Finds the single control_plane inventory host with openshift_etcd_restore_node=true.
+      - Exposes restore_node_inventory_hostname, restore_node_name, and restore_node_is_current_host.
+    author:
+      - Tristan Scholten
+    options: {}

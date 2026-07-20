@@ -3,9 +3,8 @@ kasten_namespace: kasten-io
 etcd_namespace: openshift-etcd
 etcd_restore_namespace: etcd-restore
 
-# Choose exactly one OpenShift control-plane node as the restore node.
-# This must match openshift_node_name for one host in the control_plane group.
-restore_node_name: master-0.example.com
+# Choose the restore node in hosts.yml by setting
+# openshift_etcd_restore_node: true on exactly one control_plane host.
 
 # Label used by the Kasten Kanister restore Blueprint podOverride nodeSelector.
 restore_node_label_key: etcd-restore
