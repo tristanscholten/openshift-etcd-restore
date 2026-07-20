@@ -68,9 +68,7 @@
 
 - name: Verify restore script exists on controller
   ansible.builtin.stat:
-    path: >-
-      {{ restore_script_local_path |
-         default(playbook_dir ~ '/../roles/execute_restore/files/' ~ restore_script_source) }}
+    path: "{{ playbook_dir }}/../roles/execute_restore/files/cluster-restore.sh"
   register: restore_script_local_stat
   failed_when: not restore_script_local_stat.stat.exists
 

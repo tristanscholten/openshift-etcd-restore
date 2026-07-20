@@ -61,7 +61,6 @@ Workstation:
 - SSH access with passwordless sudo to all control-plane nodes
 - the bundled OpenShift `cluster-restore.sh` from `roles/execute_restore/files/`
   - source: <https://github.com/openshift/cluster-etcd-operator/blob/main/bindata/etcd/cluster-restore.sh>
-- optional: set `restore_script_local_path` if you need to override the bundled script with a custom controller-local copy
 
 Cluster/Kasten:
 
@@ -86,7 +85,6 @@ Important variables in `inventories/prod/group_vars/all.yml`:
 ```yaml
 i_understand_this_is_destructive: false
 auto_approve_csrs: false
-restore_script_source: cluster-restore.sh
 restore_script_remote_path: /root/cluster-restore.sh
 restore_host_path: /mnt/data
 restore_snapshot_file: etcd-backup.db

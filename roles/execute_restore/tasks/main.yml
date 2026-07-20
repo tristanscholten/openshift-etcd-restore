@@ -52,9 +52,7 @@
 
 - name: Copy restore script to restore node over SSH
   ansible.builtin.copy:
-    src: >-
-      {{ restore_script_local_path |
-         default(playbook_dir ~ '/../roles/execute_restore/files/' ~ restore_script_source) }}
+    src: cluster-restore.sh
     dest: "{{ restore_script_remote_path }}"
     owner: root
     group: root
