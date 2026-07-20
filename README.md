@@ -181,6 +181,33 @@ Approve valid CSRs manually, then re-run the playbook.
    - forces redeployment of etcd, kube-apiserver, kube-controller-manager, and kube-scheduler
    - prints final verification commands
 
+## Updating the bundled restore script
+
+The playbook always uses the bundled script at:
+
+```text
+roles/execute_restore/files/cluster-restore.sh
+```
+
+Before using this repository on a real restore, check whether OpenShift changed the upstream script:
+
+```bash
+curl -fsSL \
+  https://raw.githubusercontent.com/openshift/cluster-etcd-operator/main/bindata/etcd/cluster-restore.sh \
+  -o /tmp/cluster-restore.sh
+
+sha256sum roles/execute_restore/files/cluster-restore.sh /tmp/cluster-restore.sh
+diff -u roles/execute_restore/files/cluster-restore.sh /tmp/cluster-restore.sh
+```
+
+If the upstream version is newer and appropriate for your OpenShift version, update the bundled copy:
+
+```bash
+cp /tmp/cluster-restore.sh roles/execute_restore/files/cluster-restore.sh
+ansible-playbook -i inventories/example/hosts.yml playbooks/restore.yml --syntax-check
+ansible-lint --profile moderate .
+```
+
 ## Manual machine replacement
 
 Do not delete or recreate the restore-node Machine. For each lost non-restore control-plane Machine, one at a time:
