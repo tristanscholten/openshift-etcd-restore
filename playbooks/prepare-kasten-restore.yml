@@ -1,0 +1,6 @@
+---
+- name: Prepare Kasten etcd restore target namespace and volume
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - kasten_restore_target

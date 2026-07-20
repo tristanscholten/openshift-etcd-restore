@@ -1,0 +1,7 @@
+*.retry
+.cache/
+__pycache__/
+.pytest_cache/
+.venv/
+inventories/prod/
+files/cluster-ocp-restore.sh

@@ -1,0 +1,14 @@
+---
+- name: Wait for Kasten-restored etcd snapshot on restore node
+  ansible.builtin.stat:
+    path: "{{ restore_host_path }}/{{ restore_snapshot_file }}"
+  register: snapshot_stat
+  retries: 60
+  delay: 10
+  until: snapshot_stat.stat.exists and snapshot_stat.stat.size | int > 0
+  when: openshift_node_name == restore_node_name
+
+- name: Report restored snapshot details
+  ansible.builtin.debug:
+    msg: "Found {{ restore_host_path }}/{{ restore_snapshot_file }} on {{ inventory_hostname }} with size {{ snapshot_stat.stat.size }} bytes."
+  when: openshift_node_name == restore_node_name

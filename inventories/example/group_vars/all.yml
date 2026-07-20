@@ -1,0 +1,40 @@
+# OpenShift/Kasten namespaces
+kasten_namespace: kasten-io
+etcd_namespace: openshift-etcd
+etcd_restore_namespace: etcd-restore
+
+# Choose exactly one OpenShift control-plane node as the restore node.
+# This must match openshift_node_name for one host in the control_plane group.
+restore_node_name: master-0.example.com
+
+# Label used by the Kasten Kanister restore Blueprint podOverride nodeSelector.
+restore_node_label_key: etcd-restore
+restore_node_label_value: "true"
+
+# HostPath/PV/PVC used by the Kanister restore action to place the snapshot.
+restore_host_path: /mnt/data
+restore_snapshot_file: etcd-backup.db
+restore_pv_name: pv-etcd
+restore_pvc_name: pvc-etcd
+restore_storage_class: default
+restore_storage_size: 10Gi
+
+# Modified Kasten/OpenShift cluster restore script.
+# Put it at files/cluster-ocp-restore.sh or point this variable somewhere else.
+restore_script_local_path: files/cluster-ocp-restore.sh
+restore_script_remote_path: /root/cluster-ocp-restore.sh
+
+# Safety gates.
+restore_i_understand_this_is_destructive: false
+approve_pending_csrs: false
+
+# Command paths on remote control-plane nodes.
+static_pod_path: /etc/kubernetes/manifests
+etcd_static_pod_manifest: /etc/kubernetes/manifests/etcd-pod.yaml
+kube_apiserver_static_pod_manifest: /etc/kubernetes/manifests/kube-apiserver-pod.yaml
+etcd_data_dir: /var/lib/etcd
+crictl_path: crictl
+kubelet_service_name: kubelet.service
+
+# Preflight behavior.
+preflight_check_ssh: true

@@ -1,0 +1,6 @@
+---
+- name: Wait for Kasten to place etcd snapshot on restore node
+  hosts: control_plane
+  gather_facts: false
+  roles:
+    - wait_for_snapshot

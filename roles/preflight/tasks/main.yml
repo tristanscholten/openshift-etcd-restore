@@ -1,0 +1,102 @@
+---
+- name: Validate required inventory variables
+  ansible.builtin.assert:
+    that:
+      - kasten_namespace | length > 0
+      - etcd_namespace | length > 0
+      - etcd_restore_namespace | length > 0
+      - restore_node_name | length > 0
+      - restore_host_path | length > 0
+      - restore_snapshot_file | length > 0
+      - groups['control_plane'] | default([]) | length > 0
+    fail_msg: Required OpenShift/Kasten restore variables are missing. Check inventories/example/group_vars/all.yml.
+  run_once: true
+
+- name: Build list of OpenShift control-plane node names from inventory
+  ansible.builtin.set_fact:
+    inventory_control_plane_node_names: "{{ groups['control_plane'] | map('extract', hostvars, 'openshift_node_name') | list }}"
+  run_once: true
+
+- name: Validate restore node is present in inventory
+  ansible.builtin.assert:
+    that:
+      - restore_node_name in inventory_control_plane_node_names
+    fail_msg: "restore_node_name={{ restore_node_name }} is not one of inventory OpenShift node names {{ inventory_control_plane_node_names }}."
+  run_once: true
+
+- name: Check required local commands
+  ansible.builtin.command: "bash -lc 'command -v {{ item }}'"
+  changed_when: false
+  delegate_to: localhost
+  run_once: true
+  loop:
+    - oc
+    - ansible-playbook
+
+- name: Check OpenShift authentication
+  ansible.builtin.command: oc whoami
+  register: oc_whoami
+  changed_when: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Check cluster-admin privileges
+  ansible.builtin.command: oc auth can-i '*' '*'
+  register: oc_can_i
+  changed_when: false
+  failed_when: oc_can_i.stdout | trim != 'yes'
+  delegate_to: localhost
+  run_once: true
+
+- name: Check Kasten namespace exists
+  ansible.builtin.command: "oc get namespace {{ kasten_namespace }} -o name"
+  changed_when: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Check etcd namespace exists
+  ansible.builtin.command: "oc get namespace {{ etcd_namespace }} -o name"
+  changed_when: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Check OpenShift etcd pods exist
+  ansible.builtin.command: "oc get pods -n {{ etcd_namespace }} -l app=etcd,etcd=true -o name"
+  register: etcd_pods
+  changed_when: false
+  failed_when: etcd_pods.stdout_lines | length == 0
+  delegate_to: localhost
+  run_once: true
+
+- name: Query cluster control-plane nodes
+  ansible.builtin.command: "oc get nodes -l node-role.kubernetes.io/master= -o jsonpath='{range .items[*]}{.metadata.name}{\"\\n\"}{end}'"
+  register: cluster_control_plane_nodes
+  changed_when: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Validate inventory control-plane nodes exist in cluster
+  ansible.builtin.assert:
+    that:
+      - (inventory_control_plane_node_names | difference(cluster_control_plane_nodes.stdout_lines)) | length == 0
+    fail_msg: "Inventory nodes missing from cluster master/control-plane set: {{ inventory_control_plane_node_names | difference(cluster_control_plane_nodes.stdout_lines) }}"
+  run_once: true
+
+- name: Check modified restore script exists locally
+  ansible.builtin.stat:
+    path: "{{ restore_script_local_path }}"
+  register: restore_script_stat
+  delegate_to: localhost
+  run_once: true
+
+- name: Report missing restore script as manual prerequisite
+  ansible.builtin.assert:
+    that:
+      - restore_script_stat.stat.exists
+    fail_msg: "Missing {{ restore_script_local_path }}. Add the modified Kasten/OpenShift cluster-ocp-restore.sh before running restore-etcd.yml."
+  run_once: true
+
+- name: Check SSH/sudo/crictl reachability to control-plane nodes
+  ansible.builtin.raw: "sudo -n true && command -v {{ crictl_path }} && test -d {{ static_pod_path }}"
+  changed_when: false
+  when: preflight_check_ssh | bool

@@ -1,0 +1,57 @@
+---
+- name: Check current nodes
+  ansible.builtin.command: oc get nodes -o wide
+  register: nodes
+  changed_when: false
+
+- name: Show node status
+  ansible.builtin.debug:
+    var: nodes.stdout_lines
+
+- name: List pending CSRs
+  ansible.builtin.command: "oc get csr --no-headers"
+  register: csr_list
+  changed_when: false
+  failed_when: false
+
+- name: Extract pending CSR names
+  ansible.builtin.set_fact:
+    pending_csrs: "{{ csr_list.stdout_lines | select('search', 'Pending') | map('regex_replace', '^([^ ]+).*', '\\1') | list }}"
+
+- name: Show pending CSRs for review
+  ansible.builtin.debug:
+    msg: "Pending CSRs: {{ pending_csrs | default([]) }}"
+
+- name: Approve pending CSRs when explicitly enabled
+  ansible.builtin.command: "oc adm certificate approve {{ item }}"
+  loop: "{{ pending_csrs }}"
+  when: approve_pending_csrs | bool
+  changed_when: true
+
+- name: Force etcd redeployment
+  ansible.builtin.command: "oc patch etcd cluster -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }} --type=merge"
+  changed_when: true
+
+- name: Force kube-apiserver redeployment
+  ansible.builtin.command: "oc patch kubeapiserver cluster -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }} --type=merge"
+  changed_when: true
+
+- name: Force kube-controller-manager redeployment
+  ansible.builtin.command: "oc patch kubecontrollermanager cluster -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }} --type=merge"
+  changed_when: true
+
+- name: Force kube-scheduler redeployment
+  ansible.builtin.command: "oc patch kubescheduler cluster -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }} --type=merge"
+  changed_when: true
+
+- name: Show etcd installer progressing condition
+  ansible.builtin.command: "oc get etcd -o=jsonpath='{range .items[0].status.conditions[?(@.type==\"NodeInstallerProgressing\")]}{.reason}{\"\\n\"}{.message}{\"\\n\"}'"
+  register: etcd_progress
+  changed_when: false
+
+- name: Show control-plane rollout status hints
+  ansible.builtin.debug:
+    msg:
+      - "etcd NodeInstallerProgressing:"
+      - "{{ etcd_progress.stdout_lines }}"
+      - "Run oc get pods -n openshift-etcd and confirm all etcd pods are Running."

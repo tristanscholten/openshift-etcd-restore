@@ -1,0 +1,56 @@
+---
+- name: Validate restore node selection against cluster nodes
+  ansible.builtin.command: "oc get node {{ restore_node_name }} -o name"
+  changed_when: false
+
+- name: Create restore namespace
+  ansible.builtin.command: "oc create namespace {{ etcd_restore_namespace }}"
+  register: create_restore_namespace
+  changed_when: create_restore_namespace.rc == 0
+  failed_when: create_restore_namespace.rc != 0 and 'AlreadyExists' not in create_restore_namespace.stderr
+
+- name: Render restore PersistentVolume manifest
+  ansible.builtin.template:
+    src: pv.yml.j2
+    dest: /tmp/openshift-etcd-restore-pv.yml
+    mode: '0600'
+  changed_when: false
+
+- name: Render restore PersistentVolumeClaim manifest
+  ansible.builtin.template:
+    src: pvc.yml.j2
+    dest: /tmp/openshift-etcd-restore-pvc.yml
+    mode: '0600'
+  changed_when: false
+
+- name: Apply restore PersistentVolume
+  ansible.builtin.command: oc apply -f /tmp/openshift-etcd-restore-pv.yml
+  register: apply_pv
+  changed_when: "'created' in apply_pv.stdout or 'configured' in apply_pv.stdout"
+
+- name: Apply restore PersistentVolumeClaim
+  ansible.builtin.command: oc apply -f /tmp/openshift-etcd-restore-pvc.yml
+  register: apply_pvc
+  changed_when: "'created' in apply_pvc.stdout or 'configured' in apply_pvc.stdout"
+
+- name: Label restore node for Kanister restore pod placement
+  ansible.builtin.command: "oc label node {{ restore_node_name }} {{ restore_node_label_key }}={{ restore_node_label_value }} --overwrite"
+  register: label_restore_node
+  changed_when: "'not labeled' not in label_restore_node.stdout"
+
+- name: Wait for restore PVC to bind
+  ansible.builtin.command: "oc get pvc {{ restore_pvc_name }} -n {{ etcd_restore_namespace }} -o jsonpath='{.status.phase}'"
+  register: pvc_phase
+  changed_when: false
+  retries: 30
+  delay: 10
+  until: pvc_phase.stdout == 'Bound'
+
+- name: Show Veeam Kasten dashboard restore step
+  ansible.builtin.debug:
+    msg:
+      - "Restore namespace/PV/PVC/node label are ready."
+      - "The chosen master/control-plane node {{ restore_node_name }} is labeled {{ restore_node_label_key }}={{ restore_node_label_value }}."
+      - "In the Veeam Kasten dashboard, click Restore for the wanted etcd restore point and target namespace {{ etcd_restore_namespace }}."
+      - "The Kanister restore action should place {{ restore_snapshot_file }} under {{ restore_host_path }} on {{ restore_node_name }}."
+      - "Then run playbooks/wait-for-snapshot.yml before continuing with host restore."

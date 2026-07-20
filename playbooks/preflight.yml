@@ -1,0 +1,6 @@
+---
+- name: Preflight OpenShift etcd restore prerequisites
+  hosts: all
+  gather_facts: false
+  roles:
+    - preflight
