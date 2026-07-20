@@ -103,7 +103,7 @@
         labels:
           app.kubernetes.io/name: openshift-etcd-restore
       spec:
-        storageClassName: {{ restore_storage_class }}
+        storageClassName: ""
         capacity:
           storage: {{ restore_storage_size }}
         accessModes:
@@ -133,7 +133,7 @@
         labels:
           app.kubernetes.io/name: openshift-etcd-restore
       spec:
-        storageClassName: {{ restore_storage_class }}
+        storageClassName: ""
         accessModes:
           - ReadWriteOnce
         resources:

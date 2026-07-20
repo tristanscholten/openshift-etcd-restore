@@ -91,9 +91,13 @@ etcd_restore_namespace: etcd-restore
 restore_snapshot_file: etcd-backup.db
 restore_pv_name: pv-etcd
 restore_pvc_name: pvc-etcd
-restore_storage_class: default
 restore_storage_size: 10Gi
 ```
+
+The static restore PV/PVC deliberately use `storageClassName: ""` internally.
+Do not omit that field on the PVC: if omitted, OpenShift/Kubernetes can apply
+the cluster default StorageClass, which may prevent binding to the static
+hostPath PV at `/mnt/data`.
 
 Operational constants live in role defaults, not inventory:
 

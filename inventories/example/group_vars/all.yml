@@ -18,5 +18,4 @@ etcd_restore_namespace: etcd-restore
 restore_snapshot_file: etcd-backup.db
 restore_pv_name: pv-etcd
 restore_pvc_name: pvc-etcd
-restore_storage_class: default
 restore_storage_size: 10Gi
