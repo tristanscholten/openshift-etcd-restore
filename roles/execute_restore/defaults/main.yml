@@ -1,2 +1,15 @@
 ---
-# No role-specific defaults. Shared workflow variables live in inventory.
+# Bundled restore script in roles/execute_restore/files/.
+restore_script_source: cluster-restore.sh
+restore_script_remote_path: /usr/local/bin/cluster-restore.sh
+
+# Fixed OpenShift/Kasten restore staging path.
+restore_host_path: /mnt/data
+
+# Fixed control-plane paths/commands used by the OpenShift restore procedure.
+static_pod_path: /etc/kubernetes/manifests
+etcd_static_pod_manifest: /etc/kubernetes/manifests/etcd-pod.yaml
+kube_apiserver_static_pod_manifest: /etc/kubernetes/manifests/kube-apiserver-pod.yaml
+etcd_data_dir: /var/lib/etcd
+crictl_path: crictl
+kubelet_service_name: kubelet.service

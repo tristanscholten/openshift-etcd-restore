@@ -43,7 +43,7 @@
 
 - name: Verify snapshot exists on restore node
   ansible.builtin.stat:
-    path: "/mnt/data/{{ restore_snapshot_file }}"
+    path: "{{ restore_host_path }}/{{ restore_snapshot_file }}"
   register: restore_snapshot_stat
   failed_when: >-
     not restore_snapshot_stat.stat.exists or
@@ -52,8 +52,8 @@
 
 - name: Copy restore script to restore node over SSH
   ansible.builtin.copy:
-    src: cluster-restore.sh
-    dest: /usr/local/bin/cluster-restore.sh
+    src: "{{ restore_script_source }}"
+    dest: "{{ restore_script_remote_path }}"
     owner: root
     group: root
     mode: '0700'
@@ -113,7 +113,7 @@
   when: not restore_node_is_current_host | bool
 
 - name: Run modified cluster restore script on restore node
-  ansible.builtin.command: cluster-restore.sh /mnt/data
+  ansible.builtin.command: "{{ restore_script_remote_path | basename }} {{ restore_host_path }}"
   environment:
     PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
   when: restore_node_is_current_host | bool

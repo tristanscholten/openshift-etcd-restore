@@ -1,2 +1,3 @@
 ---
-# No role-specific defaults. Shared workflow variables live in inventory.
+# Fixed command used to inspect the restored etcd container on the restore node.
+crictl_path: crictl

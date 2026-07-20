@@ -12,8 +12,6 @@ auto_approve_csrs: false
 kasten_namespace: kasten-io
 etcd_namespace: openshift-etcd
 etcd_restore_namespace: etcd-restore
-restore_node_label_key: etcd-restore
-restore_node_label_value: "true"
 
 # PV/PVC used by the Kanister restore action to place the backup on the
 # selected restore node.
@@ -22,11 +20,3 @@ restore_pv_name: pv-etcd
 restore_pvc_name: pvc-etcd
 restore_storage_class: default
 restore_storage_size: 10Gi
-
-# Control-plane host paths and commands.
-static_pod_path: /etc/kubernetes/manifests
-etcd_static_pod_manifest: /etc/kubernetes/manifests/etcd-pod.yaml
-kube_apiserver_static_pod_manifest: /etc/kubernetes/manifests/kube-apiserver-pod.yaml
-etcd_data_dir: /var/lib/etcd
-crictl_path: crictl
-kubelet_service_name: kubelet.service

@@ -85,8 +85,35 @@ Important variables in `inventories/prod/group_vars/all.yml`:
 ```yaml
 i_understand_this_is_destructive: false
 auto_approve_csrs: false
+kasten_namespace: kasten-io
+etcd_namespace: openshift-etcd
+etcd_restore_namespace: etcd-restore
 restore_snapshot_file: etcd-backup.db
+restore_pv_name: pv-etcd
+restore_pvc_name: pvc-etcd
+restore_storage_class: default
+restore_storage_size: 10Gi
 ```
+
+Operational constants live in role defaults, not inventory:
+
+| Role | Default |
+|---|---|
+| `check_prerequisites` | `restore_node_label_key: etcd-restore` |
+| `check_prerequisites` | `restore_node_label_value: "true"` |
+| `check_prerequisites` | `restore_host_path: /mnt/data` |
+| `check_prerequisites` | `static_pod_path: /etc/kubernetes/manifests` |
+| `check_prerequisites` | `crictl_path: crictl` |
+| `execute_restore` | `restore_script_source: cluster-restore.sh` |
+| `execute_restore` | `restore_script_remote_path: /usr/local/bin/cluster-restore.sh` |
+| `execute_restore` | `restore_host_path: /mnt/data` |
+| `execute_restore` | `static_pod_path: /etc/kubernetes/manifests` |
+| `execute_restore` | `etcd_static_pod_manifest: /etc/kubernetes/manifests/etcd-pod.yaml` |
+| `execute_restore` | `kube_apiserver_static_pod_manifest: /etc/kubernetes/manifests/kube-apiserver-pod.yaml` |
+| `execute_restore` | `etcd_data_dir: /var/lib/etcd` |
+| `execute_restore` | `crictl_path: crictl` |
+| `execute_restore` | `kubelet_service_name: kubelet.service` |
+| `finish_restore` | `crictl_path: crictl` |
 
 ## Kasten restore-download phase
 

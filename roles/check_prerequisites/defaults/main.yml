@@ -1,2 +1,12 @@
 ---
-# No role-specific defaults. Shared workflow variables live in inventory.
+# Kasten restore pod nodeSelector label. The Kasten Kanister Blueprint uses
+# etcd-restore=true to place the restore-download pod on the selected leader.
+restore_node_label_key: etcd-restore
+restore_node_label_value: "true"
+
+# Fixed OpenShift/Kasten restore staging path.
+restore_host_path: /mnt/data
+
+# Fixed control-plane paths/commands checked during preflight.
+static_pod_path: /etc/kubernetes/manifests
+crictl_path: crictl
