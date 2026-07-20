@@ -1,0 +1,5 @@
+---
+argument_specs:
+  main:
+    short_description: Approve or print instructions for OpenShift CSRs.
+    options: {}

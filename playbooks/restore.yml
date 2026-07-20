@@ -1,0 +1,41 @@
+---
+# Purpose: Run the OpenShift etcd restore workflow from a Kasten Kanister backup.
+# Dependencies: OpenShift cluster-admin access, SSH/sudo to control-plane nodes,
+# Kasten restore point, modified cluster-ocp-restore.sh.
+
+- name: Check OpenShift etcd restore prerequisites
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - role: check_prerequisites
+      tags:
+        - check_prerequisites
+        - prerequisites
+
+- name: Execute host-side restore up to CSR approval
+  hosts: control_plane
+  gather_facts: false
+  become: true
+  roles:
+    - role: execute_restore
+      tags:
+        - execute_restore
+        - restore
+
+- name: Approve or explain pending CSRs
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - role: approve_csrs
+      tags:
+        - approve_csrs
+        - csr
+
+- name: Finish OpenShift control-plane recovery
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - role: finish_restore
+      tags:
+        - finish_restore
+        - finish

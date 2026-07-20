@@ -1,0 +1,5 @@
+---
+argument_specs:
+  main:
+    short_description: Finish OpenShift control-plane recovery after CSR approval.
+    options: {}

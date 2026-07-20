@@ -1,101 +1,35 @@
-# OpenShift etcd Restore Automation
+# OpenShift etcd Restore
 
 ![Ansible](https://img.shields.io/badge/Ansible-2.15%2B-EE0000?logo=ansible&logoColor=white)
 ![OpenShift](https://img.shields.io/badge/OpenShift-4.x-red?logo=redhatopenshift&logoColor=white)
 ![Kasten Kanister](https://img.shields.io/badge/Kasten-Kanister-00AEEF)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
 
-Ansible automation for restoring an OpenShift etcd backup produced with the Veeam Kasten Kanister etcd Blueprint for OpenShift.
-
-The flow follows the Kasten documentation:
+A small Ansible wrapper around the Veeam Kasten Kanister OpenShift etcd restore flow:
 
 <https://docs.kasten.io/latest/kanister/etcd/ocp/install>
 
-> [!WARNING]
-> etcd restore is a disaster-recovery operation. It intentionally disrupts the OpenShift control plane. Read this README completely, test in a non-production cluster, and keep console/BMC/cloud access to every control-plane node before running the destructive playbook.
+> [!CAUTION]
+> This is disaster-recovery automation. It stops static control-plane pods, moves etcd data on non-restore control-plane nodes, runs a modified `cluster-ocp-restore.sh`, handles CSRs, and forces control-plane redeployments. Do not run it casually.
 
-## What this repository automates
+## Shape
 
-| Phase | Playbook | What it does |
-|---|---|---|
-| Preflight | `playbooks/preflight.yml` | Verifies required local tools, OpenShift admin access, Kasten namespace, etcd pods, control-plane nodes, restore node selection, optional SSH reachability, and inventory shape. |
-| Prepare Kasten restore target | `playbooks/prepare-kasten-restore.yml` | Creates the restore namespace, PV/PVC used by the Kanister restore action, labels the chosen restore node with `etcd-restore=true`, and waits for PVC binding. |
-| Wait for downloaded snapshot | `playbooks/wait-for-snapshot.yml` | Verifies the Kasten restore action has placed the etcd snapshot on the restore node, usually `/mnt/data/etcd-backup.db`. |
-| Execute host restore | `playbooks/restore-etcd.yml` | Stops static pods on non-restore control-plane nodes, moves their old etcd data aside, copies/runs `cluster-ocp-restore.sh` on the restore node, and restarts kubelet. Guarded by `restore_i_understand_this_is_destructive=true`. |
-| Post-restore recovery | `playbooks/post-restore.yml` | Checks cluster status, optionally approves pending CSRs, and forces redeployment of etcd/API server/controller manager/scheduler. |
-
-## Manual steps that still remain
-
-Some restore steps are deliberately left manual because they require operator judgement or provider-specific replacement workflows:
-
-1. **Choose the restore point in the Veeam Kasten dashboard.** This automation prepares the namespace/PVC/node label, but you must click the restore option for the selected etcd restore point in the Veeam dashboard.
-2. **Use the prepared restore node and namespace in Kasten.** The playbook labels one master/control-plane node with `etcd-restore=true`. In the Veeam restore wizard, restore into the target namespace, by default `etcd-restore`. The Kanister restore action schedules on that labeled master node and places the etcd backup on the node at `/mnt/data`, typically `/mnt/data/etcd-backup.db`. The later restore playbook uses that file.
-3. **Provide the modified `cluster-ocp-restore.sh`.** Kasten documents a modified OpenShift restore script that skips static pod manifest backup assumptions. Put that script at `files/cluster-ocp-restore.sh` or pass `-e restore_script_local_path=/path/to/cluster-ocp-restore.sh`.
-4. **Delete/recreate lost control-plane machines one by one.** On installer-provisioned infrastructure or Machine API clusters this means exporting a Machine object, sanitising fields, deleting/recreating the lost machines, and never deleting the restore node. The README includes the exact command outline below.
-5. **Review CSRs before approving.** `post-restore.yml` can approve pending CSRs automatically, but the default is review-only.
-6. **Provider-specific node recovery.** Bare metal, VMware, AWS, Azure, and agent-based installs all differ. This repo automates the common OpenShift host actions, not provider-specific machine lifecycle.
-
-## Repository layout
+One playbook:
 
 ```text
-.
-├── ansible.cfg
-├── inventories/example/
-│   ├── hosts.yml
-│   └── group_vars/all.yml
-├── playbooks/
-│   ├── preflight.yml
-│   ├── prepare-kasten-restore.yml
-│   ├── wait-for-snapshot.yml
-│   ├── restore-etcd.yml
-│   └── post-restore.yml
-├── roles/
-│   ├── preflight/
-│   ├── restore_node_selection/
-│   ├── kasten_restore_target/
-│   ├── wait_for_snapshot/
-│   ├── etcd_host_restore/
-│   └── post_restore/
-└── files/
-    └── .gitkeep
+playbooks/restore.yml
 ```
 
-## Prerequisites
+Four roles:
 
-### Operator workstation
-
-- `ansible-playbook` 2.15 or newer
-- `oc` CLI authenticated as a user with cluster-admin privileges
-- SSH access with sudo to all OpenShift control-plane nodes
-- A copy of the modified `cluster-ocp-restore.sh`
-- Network access to the OpenShift API and the control-plane hosts
-
-### OpenShift/Kasten
-
-- OpenShift 4.x cluster where etcd static pods run on control-plane nodes
-- Kasten installed, commonly in namespace `kasten-io`
-- Kanister Blueprint for OpenShift etcd backup already applied
-- A successful Kasten restore point containing the `etcdBackup` artifact
-- A chosen control-plane restore node
-
-## Quick start
-
-Clone the repo and install Ansible if needed:
-
-```bash
-git clone https://github.com/tristanscholten/openshift-etcd-restore.git
-cd openshift-etcd-restore
-ansible-playbook --version
-oc whoami
+```text
+roles/check_prerequisites   # prepare/check Kasten restore target and backup file
+roles/execute_restore       # destructive host restore up to CSR approval
+roles/approve_csrs          # auto-approve CSRs or print manual commands and stop
+roles/finish_restore        # force remaining control-plane redeployments and print final checks
 ```
 
-Copy the example inventory:
-
-```bash
-cp -R inventories/example inventories/prod
-```
-
-Edit `inventories/prod/hosts.yml`:
+The restore node is selected in inventory, not in `group_vars`:
 
 ```yaml
 all:
@@ -116,102 +50,138 @@ all:
           openshift_etcd_restore_node: false
 ```
 
-Set `openshift_etcd_restore_node: true` on exactly one `control_plane` host. The playbooks derive `restore_node_name` from that host's `openshift_node_name`, so the restore-node choice lives next to the host definition.
+Exactly one `control_plane` host must have `openshift_etcd_restore_node: true`.
 
-Edit `inventories/prod/group_vars/all.yml` and at minimum set the restore script path if you do not use the default:
+## Prerequisites
+
+Workstation:
+
+- `ansible-playbook`
+- `oc` authenticated as cluster-admin
+- SSH access with passwordless sudo to all control-plane nodes
+- modified Kasten/OpenShift `cluster-ocp-restore.sh` at `files/cluster-ocp-restore.sh`, or override `restore_script_local_path`
+
+Cluster/Kasten:
+
+- Kasten installed, default namespace `kasten-io`
+- OpenShift etcd pods in `openshift-etcd`
+- Kasten Kanister etcd Blueprint applied
+- a successful etcd restore point
+- a selected restore control-plane node
+
+## Configure
+
+Copy and edit the example inventory:
+
+```bash
+cp -R inventories/example inventories/prod
+vi inventories/prod/hosts.yml
+vi inventories/prod/group_vars/all.yml
+```
+
+Important variables in `inventories/prod/group_vars/all.yml`:
 
 ```yaml
+i_understand_this_is_destructive: false
+auto_approve_csrs: false
 restore_script_local_path: files/cluster-ocp-restore.sh
+restore_host_path: /mnt/data
+restore_snapshot_file: etcd-backup.db
 ```
 
-Then run the safe preflight checks:
+## Kasten restore-download phase
 
-```bash
-ansible-playbook -i inventories/prod/hosts.yml playbooks/preflight.yml
+The playbook prepares the target namespace/PV/PVC and labels the restore node. The actual Kasten restore selection remains a manual dashboard action because you must choose the correct restore point.
+
+The relevant restore phase from the Kasten Blueprint is:
+
+```yaml
+restore:
+  # This phase is not actualy performing restore of the etcd data store but is used
+  # to copy backup data to one of the leader nodes. It spins a pod on a leader node
+  # having label etcd-restore. The pod is used to download the backup file from the
+  # object store and copy it to the /mnt/data location of the PV mapped to PVC pvc-etcd.
+  # The PV's mount path is /mnt/data on leader node where the cluster-ocp-restore.sh
+  # script would be executed.
 ```
 
-Prepare the restore namespace/PV/PVC/node label:
-
-```bash
-ansible-playbook -i inventories/prod/hosts.yml playbooks/prepare-kasten-restore.yml
-```
-
-## Veeam Kasten dashboard restore step
-
-This part is intentionally manual and important:
+When the playbook stops because `/mnt/data/etcd-backup.db` is missing:
 
 1. Open the Veeam Kasten dashboard.
-2. Locate the restore point for the OpenShift etcd backup created with the Kanister etcd Blueprint.
-3. Make sure the chosen master/control-plane node has the label `etcd-restore=true`. The `prepare-kasten-restore.yml` playbook applies this label automatically.
-4. Click the **Restore** option for that restore point.
-5. Choose the prepared target namespace, by default `etcd-restore`.
-6. Start the restore.
-7. Kasten/Kanister schedules the restore pod on the labeled master node and downloads the etcd backup to the restore PV mounted at `/mnt/data`.
-8. The expected file is `/mnt/data/etcd-backup.db` on the restore node. This file is what `cluster-ocp-restore.sh` consumes in the later host restore steps.
+2. Select the wanted etcd restore point.
+3. Restore into the namespace configured by `etcd_restore_namespace`, default `etcd-restore`.
+4. Confirm the Kanister restore pod runs on the node labeled `etcd-restore=true`.
+5. Confirm the backup file exists on the restore node at `/mnt/data/etcd-backup.db`.
+6. Re-run the playbook.
 
-Verify that the snapshot is present:
+## Run
 
-```bash
-ansible-playbook -i inventories/prod/hosts.yml playbooks/wait-for-snapshot.yml
-```
-
-Do not continue to the destructive host restore until this playbook confirms that `/mnt/data/etcd-backup.db` exists and has non-zero size on the restore node.
-
-## Destructive restore execution
-
-> [!CAUTION]
-> This stops static etcd and API server pods on non-restore control-plane nodes and moves old etcd data directories aside. Do not run this unless the cluster is in an etcd restore scenario and you have out-of-band access to all control-plane nodes.
-
-Dry-run-ish preview of host targeting:
+Safe syntax check:
 
 ```bash
-ansible-playbook -i inventories/prod/hosts.yml playbooks/restore-etcd.yml --list-hosts
+ansible-playbook -i inventories/prod/hosts.yml playbooks/restore.yml --syntax-check
 ```
 
-Execute the restore:
+Run the full restore only after setting the destructive confirmation:
 
 ```bash
 ansible-playbook \
   -i inventories/prod/hosts.yml \
-  playbooks/restore-etcd.yml \
-  -e restore_i_understand_this_is_destructive=true
+  playbooks/restore.yml \
+  -e i_understand_this_is_destructive=true
 ```
 
-The playbook performs the common Kasten/OpenShift host-side sequence:
-
-1. Confirms exactly one inventory control-plane host has `openshift_etcd_restore_node: true`.
-2. Confirms the etcd snapshot exists on the restore node.
-3. Copies the modified `cluster-ocp-restore.sh` to the restore node.
-4. On every non-restore control-plane node:
-   - moves `/etc/kubernetes/manifests/etcd-pod.yaml` out of the static pod path
-   - waits for etcd static pod containers to stop
-   - moves `/etc/kubernetes/manifests/kube-apiserver-pod.yaml` out of the static pod path
-   - waits for kube-apiserver static pod containers to stop
-   - moves `/var/lib/etcd` aside to a timestamped path
-5. On the restore node:
-   - runs `sudo ./cluster-ocp-restore.sh /mnt/data`
-6. Restarts kubelet on all control-plane nodes.
-
-## Post-restore recovery
-
-Run the post-restore checks and force redeployments:
-
-```bash
-ansible-playbook -i inventories/prod/hosts.yml playbooks/post-restore.yml
-```
-
-By default this shows pending CSRs but does not approve them. To approve pending CSRs automatically:
+To automatically approve pending CSRs:
 
 ```bash
 ansible-playbook \
   -i inventories/prod/hosts.yml \
-  playbooks/post-restore.yml \
-  -e approve_pending_csrs=true
+  playbooks/restore.yml \
+  -e i_understand_this_is_destructive=true \
+  -e auto_approve_csrs=true
 ```
 
-## Manual machine replacement outline
+If `auto_approve_csrs=false` and pending CSRs exist, the playbook prints:
 
-Do not delete or recreate the restore-node Machine. For each lost non-restore control-plane machine, one at a time:
+```bash
+oc get csr
+oc describe csr <csr_name>
+oc adm certificate approve <csr_name>
+```
+
+Approve valid CSRs manually, then re-run the playbook.
+
+## What the playbook does
+
+1. `check_prerequisites`
+   - verifies local tools and OpenShift admin access
+   - verifies Kasten and etcd namespaces
+   - verifies etcd pods are discoverable
+   - verifies SSH/sudo/crictl/static pod access on all control-plane hosts
+   - ensures the restore namespace, PV, PVC, and restore-node label exist
+   - verifies the Kasten restore has downloaded the etcd backup to the restore node
+
+2. `execute_restore`
+   - requires `i_understand_this_is_destructive=true`
+   - stops etcd and kube-apiserver static pods on non-restore control-plane nodes
+   - moves old `/var/lib/etcd` aside on non-restore nodes
+   - copies and runs the modified `cluster-ocp-restore.sh /mnt/data` on the restore node
+   - restarts kubelet on all control-plane nodes
+
+3. `approve_csrs`
+   - lists pending CSRs
+   - approves them when `auto_approve_csrs=true`
+   - otherwise prints manual approval commands and stops if pending CSRs exist
+
+4. `finish_restore`
+   - verifies etcd container/pods
+   - prints machine replacement instructions for lost non-restore control-plane machines
+   - forces redeployment of etcd, kube-apiserver, kube-controller-manager, and kube-scheduler
+   - prints final verification commands
+
+## Manual machine replacement
+
+Do not delete or recreate the restore-node Machine. For each lost non-restore control-plane Machine, one at a time:
 
 ```bash
 oc get machines -n openshift-machine-api -o wide
@@ -220,7 +190,7 @@ oc get machine <old-master-machine> -n openshift-machine-api -o yaml > new-maste
 
 Edit `new-master-machine.yaml`:
 
-- remove the entire `status` section
+- remove `status`
 - set a new `metadata.name`
 - remove `spec.providerID`
 - remove `metadata.annotations`
@@ -228,18 +198,17 @@ Edit `new-master-machine.yaml`:
 - remove `metadata.resourceVersion`
 - remove `metadata.uid`
 
-Then recreate:
+Then:
 
 ```bash
 oc delete machine -n openshift-machine-api <old-master-machine>
-oc get machines -n openshift-machine-api -o wide
 oc apply -f new-master-machine.yaml
 oc get machines -n openshift-machine-api -o wide
 ```
 
-Wait until the replacement machine reaches `Running` and the Node joins before replacing the next one.
+Wait for the replacement node before recreating the next one.
 
-## Useful verification commands
+## Final checks
 
 ```bash
 oc get nodes -w
@@ -250,14 +219,6 @@ oc get kubeapiserver -o=jsonpath='{range .items[0].status.conditions[?(@.type=="
 oc get kubecontrollermanager -o=jsonpath='{range .items[0].status.conditions[?(@.type=="NodeInstallerProgressing")]}{.reason}{"\n"}{.message}{"\n"}'
 oc get kubescheduler -o=jsonpath='{range .items[0].status.conditions[?(@.type=="NodeInstallerProgressing")]}{.reason}{"\n"}{.message}{"\n"}'
 ```
-
-## Safety defaults
-
-- Destructive host restore tasks do nothing unless `restore_i_understand_this_is_destructive=true`.
-- CSR approval is review-only unless `approve_pending_csrs=true`.
-- Static pod manifests and `/var/lib/etcd` are moved to timestamped backup paths, not deleted.
-- The restore node is never included in the non-restore etcd data move.
-- Preflight validates OpenShift API access, Kasten namespace, etcd pods, control-plane nodes, and the chosen restore node before changes.
 
 ## License
 

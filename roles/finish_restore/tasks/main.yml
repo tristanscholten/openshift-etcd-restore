@@ -1,0 +1,101 @@
+---
+- name: Initialize restore-node host list
+  ansible.builtin.set_fact:
+    restore_node_inventory_hosts: []
+
+- name: Collect restore-node hosts from inventory
+  ansible.builtin.set_fact:
+    restore_node_inventory_hosts: "{{ restore_node_inventory_hosts + [item] }}"
+  loop: "{{ groups['control_plane'] | default([]) }}"
+  when: hostvars[item].openshift_etcd_restore_node | default(false) | bool
+
+- name: Verify exactly one restore node is configured
+  ansible.builtin.assert:
+    that:
+      - restore_node_inventory_hosts | length == 1
+    fail_msg: >-
+      Set openshift_etcd_restore_node: true on exactly one host in the
+      control_plane inventory group.
+
+- name: Set restore-node facts
+  ansible.builtin.set_fact:
+    restore_node_inventory_hostname: "{{ restore_node_inventory_hosts[0] }}"
+    restore_node_name: >-
+      {{ hostvars[restore_node_inventory_hosts[0]].openshift_node_name |
+         default(restore_node_inventory_hosts[0]) }}
+
+- name: Verify etcd container is running on restore node
+  ansible.builtin.shell: >-
+    set -o pipefail && sudo {{ crictl_path }} ps | grep etcd | grep -v operator
+  args:
+    executable: /bin/bash
+  register: restore_node_etcd_container
+  changed_when: false
+  delegate_to: "{{ restore_node_inventory_hostname }}"
+
+- name: Verify OpenShift can see restored etcd pods
+  ansible.builtin.shell: >-
+    set -o pipefail && oc get pods -n {{ etcd_namespace }} |
+    grep -v etcd-quorum-guard | grep etcd
+  args:
+    executable: /bin/bash
+  register: etcd_pods_after_restore
+  changed_when: false
+  failed_when: false
+
+- name: Show manual machine replacement instructions
+  ansible.builtin.debug:
+    msg:
+      - "If non-restore control-plane machines were lost, recreate them one by one now."
+      - "Do not delete or recreate the restore-node Machine: {{ restore_node_name }}."
+      - "For Machine API clusters:"
+      - "  oc get machines -n openshift-machine-api -o wide"
+      - "  oc get machine <old-master-machine> -n openshift-machine-api -o yaml > new-master-machine.yaml"
+      - "Edit new-master-machine.yaml: remove status, providerID, annotations, generation, resourceVersion, uid; set a new metadata.name."
+      - "  oc delete machine -n openshift-machine-api <old-master-machine>"
+      - "  oc apply -f new-master-machine.yaml"
+      - "Wait for the replacement node before recreating the next one."
+
+- name: Force etcd redeployment
+  ansible.builtin.command: >-
+    oc patch etcd cluster
+    -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }}
+    --type=merge
+  changed_when: true
+
+- name: Force kube-apiserver redeployment
+  ansible.builtin.command: >-
+    oc patch kubeapiserver cluster
+    -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }}
+    --type=merge
+  changed_when: true
+
+- name: Force kube-controller-manager redeployment
+  ansible.builtin.command: >-
+    oc patch kubecontrollermanager cluster
+    -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }}
+    --type=merge
+  changed_when: true
+
+- name: Force kube-scheduler redeployment
+  ansible.builtin.command: >-
+    oc patch kubescheduler cluster
+    -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }}
+    --type=merge
+  changed_when: true
+
+- name: Show etcd installer progress
+  ansible.builtin.command: >-
+    oc get etcd
+    -o=jsonpath='{range .items[0].status.conditions[?(@.type=="NodeInstallerProgressing")]}{.reason}{"\n"}{.message}{"\n"}'
+  register: etcd_progress
+  changed_when: false
+
+- name: Show final verification commands
+  ansible.builtin.debug:
+    msg:
+      - "etcd progress: {{ etcd_progress.stdout_lines }}"
+      - "Final checks:"
+      - "  oc get nodes -w"
+      - "  oc get pods -n openshift-etcd | grep -v etcd-quorum-guard | grep etcd"
+      - "  oc get kubeapiserver kubecontrollermanager kubescheduler -o yaml"

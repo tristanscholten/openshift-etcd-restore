@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: finish_restore
+  namespace: openshift_etcd_restore
+  author: Tristan Scholten
+  description: Finish OpenShift control-plane redeployments after etcd restore.
+  license: MIT
+  min_ansible_version: "2.15"
+
+dependencies: []

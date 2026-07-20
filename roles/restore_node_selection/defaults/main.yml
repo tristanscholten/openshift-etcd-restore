@@ -1,3 +1,0 @@
----
-# This role intentionally has no user-facing defaults.
-# Set openshift_etcd_restore_node: true on exactly one control_plane inventory host.

@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: check_prerequisites
+  namespace: openshift_etcd_restore
+  author: Tristan Scholten
+  description: Check and prepare prerequisites for Kasten OpenShift etcd restore.
+  license: MIT
+  min_ansible_version: "2.15"
+
+dependencies: []

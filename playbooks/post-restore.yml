@@ -1,6 +1,0 @@
----
-- name: Run OpenShift post-restore recovery tasks
-  hosts: localhost
-  gather_facts: false
-  roles:
-    - post_restore

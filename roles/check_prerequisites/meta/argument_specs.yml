@@ -1,0 +1,5 @@
+---
+argument_specs:
+  main:
+    short_description: Check and prepare Kasten OpenShift etcd restore prerequisites.
+    options: {}

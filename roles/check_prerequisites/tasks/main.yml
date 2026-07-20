@@ -1,0 +1,193 @@
+---
+- name: Initialize restore-node host list
+  ansible.builtin.set_fact:
+    restore_node_inventory_hosts: []
+
+- name: Collect restore-node hosts from inventory
+  ansible.builtin.set_fact:
+    restore_node_inventory_hosts: "{{ restore_node_inventory_hosts + [item] }}"
+  loop: "{{ groups['control_plane'] | default([]) }}"
+  when: hostvars[item].openshift_etcd_restore_node | default(false) | bool
+
+- name: Verify exactly one restore node is configured
+  ansible.builtin.assert:
+    that:
+      - groups['control_plane'] | default([]) | length > 0
+      - restore_node_inventory_hosts | length == 1
+    fail_msg: >-
+      Set openshift_etcd_restore_node: true on exactly one host in the
+      control_plane inventory group.
+
+- name: Set restore-node facts
+  ansible.builtin.set_fact:
+    restore_node_inventory_hostname: "{{ restore_node_inventory_hosts[0] }}"
+    restore_node_name: >-
+      {{ hostvars[restore_node_inventory_hosts[0]].openshift_node_name |
+         default(restore_node_inventory_hosts[0]) }}
+
+- name: Verify required local commands exist
+  ansible.builtin.command: "bash -lc 'command -v {{ item }}'"
+  changed_when: false
+  loop:
+    - oc
+    - ansible-playbook
+
+- name: Verify OpenShift login
+  ansible.builtin.command: oc whoami
+  changed_when: false
+
+- name: Verify cluster-admin privileges
+  ansible.builtin.command: oc auth can-i '*' '*'
+  register: cluster_admin_check
+  changed_when: false
+  failed_when: cluster_admin_check.stdout | trim != 'yes'
+
+- name: Verify required namespaces
+  ansible.builtin.command: "oc get namespace {{ item }} -o name"
+  changed_when: false
+  loop:
+    - "{{ kasten_namespace }}"
+    - "{{ etcd_namespace }}"
+
+- name: Verify etcd pods are discoverable
+  ansible.builtin.command: >-
+    oc get pods -n {{ etcd_namespace }} -l app=etcd,etcd=true -o name
+  register: etcd_pod_check
+  changed_when: false
+  failed_when: etcd_pod_check.stdout_lines | length == 0
+
+- name: Verify restore node exists in OpenShift
+  ansible.builtin.command: "oc get node {{ restore_node_name }} -o name"
+  changed_when: false
+
+- name: Verify inventory control-plane hosts exist in OpenShift
+  ansible.builtin.command: >-
+    oc get node {{ hostvars[item].openshift_node_name | default(item) }} -o name
+  changed_when: false
+  loop: "{{ groups['control_plane'] }}"
+
+- name: Verify modified restore script exists locally
+  ansible.builtin.stat:
+    path: "{{ restore_script_local_path }}"
+  register: restore_script_local_stat
+  failed_when: not restore_script_local_stat.stat.exists
+
+- name: Verify SSH, sudo, crictl, and static-pod path on control-plane nodes
+  ansible.builtin.raw: >-
+    sudo -n true && command -v {{ crictl_path }} && test -d {{ static_pod_path }}
+  changed_when: false
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['control_plane'] }}"
+
+- name: Ensure Kasten restore namespace exists
+  ansible.builtin.command: "oc create namespace {{ etcd_restore_namespace }}"
+  register: create_restore_namespace
+  changed_when: create_restore_namespace.rc == 0
+  failed_when: >-
+    create_restore_namespace.rc != 0 and
+    'AlreadyExists' not in create_restore_namespace.stderr
+
+- name: Apply restore PersistentVolume
+  ansible.builtin.command:
+    argv:
+      - oc
+      - apply
+      - -f
+      - -
+  args:
+    stdin: |
+      apiVersion: v1
+      kind: PersistentVolume
+      metadata:
+        name: {{ restore_pv_name }}
+        labels:
+          app.kubernetes.io/name: openshift-etcd-restore
+      spec:
+        storageClassName: {{ restore_storage_class }}
+        capacity:
+          storage: {{ restore_storage_size }}
+        accessModes:
+          - ReadWriteOnce
+        persistentVolumeReclaimPolicy: Retain
+        hostPath:
+          path: {{ restore_host_path | quote }}
+  register: apply_restore_pv
+  changed_when: >-
+    'created' in apply_restore_pv.stdout or
+    'configured' in apply_restore_pv.stdout
+
+- name: Apply restore PersistentVolumeClaim
+  ansible.builtin.command:
+    argv:
+      - oc
+      - apply
+      - -f
+      - -
+  args:
+    stdin: |
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: {{ restore_pvc_name }}
+        namespace: {{ etcd_restore_namespace }}
+        labels:
+          app.kubernetes.io/name: openshift-etcd-restore
+      spec:
+        storageClassName: {{ restore_storage_class }}
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ restore_storage_size }}
+  register: apply_restore_pvc
+  changed_when: >-
+    'created' in apply_restore_pvc.stdout or
+    'configured' in apply_restore_pvc.stdout
+
+- name: Label restore node for Kanister restore pod placement
+  ansible.builtin.command: >-
+    oc label node {{ restore_node_name }}
+    {{ restore_node_label_key }}={{ restore_node_label_value }} --overwrite
+  register: label_restore_node
+  changed_when: "'not labeled' not in label_restore_node.stdout"
+
+- name: Wait for restore PVC to bind
+  ansible.builtin.command: >-
+    oc get pvc {{ restore_pvc_name }} -n {{ etcd_restore_namespace }}
+    -o jsonpath='{.status.phase}'
+  register: restore_pvc_phase
+  changed_when: false
+  retries: 30
+  delay: 10
+  until: restore_pvc_phase.stdout == 'Bound'
+
+- name: Show required Kasten restore-download step
+  ansible.builtin.debug:
+    msg:
+      - "Kasten target is prepared. If the backup file is not present yet, run the restore action in Veeam Kasten now."
+      - "Target namespace: {{ etcd_restore_namespace }}"
+      - "Restore node label: {{ restore_node_label_key }}={{ restore_node_label_value }}"
+      - "Expected backup on restore node: {{ restore_host_path }}/{{ restore_snapshot_file }}"
+      - "Kanister Blueprint restore phase note follows exactly from the Kasten documentation."
+      - "# This phase is not actualy performing restore of the etcd data store but is used"
+      - "# to copy backup data to one of the leader nodes. It spins a pod on a leader node"
+      - "# having label etcd-restore. The pod is used to download the backup file from the"
+      - "# object store and copy it to the /mnt/data location of the PV mapped to PVC pvc-etcd."
+      - "# The PV's mount path is /mnt/data on leader node where the cluster-ocp-restore.sh"
+      - "# script would be executed."
+
+- name: Verify downloaded etcd backup exists on restore node
+  ansible.builtin.stat:
+    path: "{{ restore_host_path }}/{{ restore_snapshot_file }}"
+  register: restored_snapshot_stat
+  delegate_to: "{{ restore_node_inventory_hostname }}"
+  failed_when: >-
+    not restored_snapshot_stat.stat.exists or
+    restored_snapshot_stat.stat.size | int == 0
+
+- name: Confirm prerequisites are ready
+  ansible.builtin.debug:
+    msg: >-
+      Prerequisites are ready. Restore node {{ restore_node_name }} has
+      {{ restore_host_path }}/{{ restore_snapshot_file }} with size
+      {{ restored_snapshot_stat.stat.size }} bytes.
