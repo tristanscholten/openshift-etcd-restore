@@ -24,9 +24,11 @@ restore_pvc_name: pvc-etcd
 restore_storage_class: default
 restore_storage_size: 10Gi
 
-# Modified Kasten/OpenShift restore script from the Kasten documentation.
-restore_script_local_path: files/cluster-ocp-restore.sh
-restore_script_remote_path: /root/cluster-ocp-restore.sh
+# Restore script bundled in roles/execute_restore/files/.
+# Override restore_script_local_path only when you need to provide a custom
+# controller-local script instead of the bundled OpenShift script.
+restore_script_source: cluster-restore.sh
+restore_script_remote_path: /root/cluster-restore.sh
 
 # Control-plane host paths and commands.
 static_pod_path: /etc/kubernetes/manifests

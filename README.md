@@ -10,7 +10,7 @@ A small Ansible wrapper around the Veeam Kasten Kanister OpenShift etcd restore 
 <https://docs.kasten.io/latest/kanister/etcd/ocp/install>
 
 > [!CAUTION]
-> This is disaster-recovery automation. It stops static control-plane pods, moves etcd data on non-restore control-plane nodes, runs a modified `cluster-ocp-restore.sh`, handles CSRs, and forces control-plane redeployments. Do not run it casually.
+> This is disaster-recovery automation. It stops static control-plane pods, moves etcd data on non-restore control-plane nodes, runs the bundled OpenShift `cluster-restore.sh`, handles CSRs, and forces control-plane redeployments. Do not run it casually.
 
 ## Shape
 
@@ -59,7 +59,9 @@ Workstation:
 - `ansible-playbook`
 - `oc` authenticated as cluster-admin
 - SSH access with passwordless sudo to all control-plane nodes
-- modified Kasten/OpenShift `cluster-ocp-restore.sh` at `files/cluster-ocp-restore.sh`, or override `restore_script_local_path`
+- the bundled OpenShift `cluster-restore.sh` from `roles/execute_restore/files/`
+  - source: <https://github.com/openshift/cluster-etcd-operator/blob/main/bindata/etcd/cluster-restore.sh>
+- optional: set `restore_script_local_path` if you need to override the bundled script with a custom controller-local copy
 
 Cluster/Kasten:
 
@@ -84,7 +86,8 @@ Important variables in `inventories/prod/group_vars/all.yml`:
 ```yaml
 i_understand_this_is_destructive: false
 auto_approve_csrs: false
-restore_script_local_path: files/cluster-ocp-restore.sh
+restore_script_source: cluster-restore.sh
+restore_script_remote_path: /root/cluster-restore.sh
 restore_host_path: /mnt/data
 restore_snapshot_file: etcd-backup.db
 ```
@@ -165,7 +168,8 @@ Approve valid CSRs manually, then re-run the playbook.
    - requires `i_understand_this_is_destructive=true`
    - stops etcd and kube-apiserver static pods on non-restore control-plane nodes
    - moves old `/var/lib/etcd` aside on non-restore nodes
-   - copies and runs the modified `cluster-ocp-restore.sh /mnt/data` on the restore node
+   - copies the bundled `cluster-restore.sh` to the restore node over SSH
+   - runs `/root/cluster-restore.sh /mnt/data` on the restore node
    - restarts kubelet on all control-plane nodes
 
 3. `approve_csrs`

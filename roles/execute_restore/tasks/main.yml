@@ -50,9 +50,11 @@
     restore_snapshot_stat.stat.size | int == 0
   when: restore_node_is_current_host | bool
 
-- name: Copy modified restore script to restore node
+- name: Copy restore script to restore node over SSH
   ansible.builtin.copy:
-    src: "{{ restore_script_local_path }}"
+    src: >-
+      {{ restore_script_local_path |
+         default(playbook_dir ~ '/../roles/execute_restore/files/' ~ restore_script_source) }}
     dest: "{{ restore_script_remote_path }}"
     owner: root
     group: root

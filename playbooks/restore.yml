@@ -1,7 +1,7 @@
 ---
 # Purpose: Run the OpenShift etcd restore workflow from a Kasten Kanister backup.
 # Dependencies: OpenShift cluster-admin access, SSH/sudo to control-plane nodes,
-# Kasten restore point, modified cluster-ocp-restore.sh.
+# Kasten restore point, bundled OpenShift cluster-restore.sh.
 
 - name: Check OpenShift etcd restore prerequisites
   hosts: localhost
