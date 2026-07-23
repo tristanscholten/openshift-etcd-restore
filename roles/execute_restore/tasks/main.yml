@@ -85,7 +85,6 @@
 - name: Capture restore timestamp
   ansible.builtin.set_fact:
     restore_timestamp: "{{ lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ') }}"
-  run_once: true
 
 - name: Verify snapshot exists on restore node
   ansible.builtin.stat:
@@ -108,10 +107,10 @@
 - name: Move etcd static pod manifest away on non-restore nodes
   ansible.builtin.command: >-
     mv {{ etcd_static_pod_manifest }}
-    /tmp/etcd-pod.yaml.{{ hostvars[groups['control_plane'][0]].restore_timestamp }}
+    /tmp/etcd-pod.yaml.{{ restore_timestamp }}
   args:
     removes: "{{ etcd_static_pod_manifest }}"
-    creates: "/tmp/etcd-pod.yaml.{{ hostvars[groups['control_plane'][0]].restore_timestamp }}"
+    creates: "/tmp/etcd-pod.yaml.{{ restore_timestamp }}"
   when: not restore_node_is_current_host | bool
 
 - name: Wait for etcd static pod containers to stop on non-restore nodes
@@ -130,10 +129,10 @@
 - name: Move kube-apiserver static pod manifest away on non-restore nodes
   ansible.builtin.command: >-
     mv {{ kube_apiserver_static_pod_manifest }}
-    /tmp/kube-apiserver-pod.yaml.{{ hostvars[groups['control_plane'][0]].restore_timestamp }}
+    /tmp/kube-apiserver-pod.yaml.{{ restore_timestamp }}
   args:
     removes: "{{ kube_apiserver_static_pod_manifest }}"
-    creates: "/tmp/kube-apiserver-pod.yaml.{{ hostvars[groups['control_plane'][0]].restore_timestamp }}"
+    creates: "/tmp/kube-apiserver-pod.yaml.{{ restore_timestamp }}"
   when: not restore_node_is_current_host | bool
 
 - name: Wait for kube-apiserver static pod containers to stop on non-restore nodes
@@ -152,10 +151,10 @@
 - name: Move old etcd data directory aside on non-restore nodes
   ansible.builtin.command: >-
     mv {{ etcd_data_dir }}
-    /tmp/etcd.{{ hostvars[groups['control_plane'][0]].restore_timestamp }}
+    /tmp/etcd.{{ restore_timestamp }}
   args:
     removes: "{{ etcd_data_dir }}"
-    creates: "/tmp/etcd.{{ hostvars[groups['control_plane'][0]].restore_timestamp }}"
+    creates: "/tmp/etcd.{{ restore_timestamp }}"
   when: not restore_node_is_current_host | bool
 
 - name: Run modified cluster restore script on restore node

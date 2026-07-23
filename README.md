@@ -24,10 +24,11 @@ the cluster and inventory to be prepared exactly:
 - the Kasten etcd Blueprint, policy, restore point, and restore namespace exist
 - the operator has validated that this is the correct recovery host and backup
 
-The playbook now creates the restore host path, prepares the PV/PVC, waits longer
-for static pods and etcd recovery, and waits for stable ClusterOperators after
-forced redeployments. Human judgement is still required for Kasten restore point
-selection, CSR validation, and lost-machine replacement.
+The playbook now creates the restore host path, verifies the pre-existing
+PV/PVC, waits longer for static pods and etcd recovery, and waits for stable
+ClusterOperators after forced redeployments. Human judgement is still required
+for Kasten restore point selection, CSR validation, and lost-machine
+replacement.
 
 ## Shape
 
@@ -116,12 +117,17 @@ etcd_restore_namespace: etcd-restore
 restore_snapshot_file: etcd-backup.db
 restore_pv_name: pv-etcd
 restore_pvc_name: pvc-etcd
-restore_storage_size: 10Gi
 ```
 
-The static restore PV/PVC deliberately use `storageClassName: ""` internally.
-Do not omit that field on the PVC: if omitted, OpenShift/Kubernetes can apply
-the cluster default StorageClass, which may prevent binding to the static
+The restore namespace, PV, and PVC are prerequisites. The playbook verifies that
+they exist and that the PVC is already `Bound`; it does not create or mutate
+them. The Kasten documentation names these resources `pv-etcd` and `pvc-etcd`.
+If your manifests use different names, update `restore_pv_name` and
+`restore_pvc_name`.
+
+Use an empty `storageClassName: ""` on static PV/PVC manifests unless you
+intentionally provision dynamic storage. If omitted, OpenShift/Kubernetes can
+apply the cluster default StorageClass, which may prevent binding to the static
 hostPath PV at `/mnt/data`.
 
 Operational constants live in role defaults, not inventory:
@@ -167,7 +173,7 @@ restore_script_environment:
 
 ## Kasten restore-download phase
 
-The playbook prepares the target namespace/PV/PVC and uses the existing
+The playbook verifies the target namespace/PV/PVC and uses the existing
 `etcd-restore=true` node label to identify the restore node. The actual Kasten
 restore selection remains a manual dashboard action because you must choose the
 correct restore point.
@@ -237,7 +243,7 @@ Approve valid CSRs manually, then re-run the playbook.
    - verifies Kasten and etcd namespaces
    - verifies etcd pods are discoverable
    - verifies SSH/sudo/crictl/static pod access on all control-plane hosts
-   - ensures the restore namespace, PV, and PVC exist
+   - verifies the restore namespace, PV, and bound PVC exist
    - verifies exactly one control-plane node has the restore-node label
    - verifies the Kasten restore has downloaded the etcd backup to the restore node
 

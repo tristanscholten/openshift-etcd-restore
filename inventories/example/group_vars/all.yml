@@ -13,9 +13,8 @@ kasten_namespace: kasten-io
 etcd_namespace: openshift-etcd
 etcd_restore_namespace: etcd-restore
 
-# PV/PVC used by the Kanister restore action to place the backup on the
-# selected restore node.
+# Pre-existing PV/PVC used by the Kanister restore action to place the backup on
+# the selected restore node.
 restore_snapshot_file: etcd-backup.db
 restore_pv_name: pv-etcd
 restore_pvc_name: pvc-etcd
-restore_storage_size: 10Gi
