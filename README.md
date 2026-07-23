@@ -55,8 +55,10 @@ oc label node master-0.example.com etcd-restore=true --overwrite
 ```
 
 If zero or multiple nodes have the label, the playbook stops before restore
-work. If the SSH inventory hostname differs from the OpenShift node name, set
-`openshift_node_name` on that inventory host.
+work. The labeled node must also carry the OpenShift 4.12+ control-plane role
+label `node-role.kubernetes.io/control-plane`. If the SSH inventory hostname
+differs from the OpenShift node name, set `openshift_node_name` on that
+inventory host.
 
 ## Prerequisites
 
