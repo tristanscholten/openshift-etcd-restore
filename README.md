@@ -210,6 +210,14 @@ ansible-playbook \
   -e auto_approve_csrs=true
 ```
 
+With `auto_approve_csrs=true`, the playbook also attempts the common post-restore
+kubelet recovery path automatically: if a control-plane node remains `NotReady`
+after kubelet restart, it removes `/var/lib/kubelet/pki/*.pem`, restarts
+`kubelet.service`, waits briefly for new CSRs, and then the `approve_csrs` role
+approves pending CSRs. This covers the normal kubelet client certificate recovery
+case. It also detects a stopped kubelet and tries to start/enable it before
+falling back to manual diagnostics.
+
 If `auto_approve_csrs=false` and pending CSRs exist, the playbook prints:
 
 ```bash
@@ -239,7 +247,8 @@ Approve valid CSRs manually, then re-run the playbook.
    - copies the bundled `cluster-restore.sh` to `/usr/local/bin/cluster-restore.sh` on the restore node over SSH
    - runs `cluster-restore.sh /mnt/data` on the restore node
    - restarts kubelet on all control-plane nodes
-   - prints the Kasten/OpenShift kubelet certificate recovery step for nodes that stay `NotReady`: remove `/var/lib/kubelet/pki/*.pem`, restart kubelet, then approve valid CSRs
+   - verifies kubelet is running and tries to start/enable it when it is stopped
+   - automatically performs kubelet certificate recovery for nodes that stay `NotReady`: remove `/var/lib/kubelet/pki/*.pem`, restart kubelet, then let the CSR role approve or print pending CSRs
 
 3. `approve_csrs`
    - lists pending CSRs
@@ -249,9 +258,28 @@ Approve valid CSRs manually, then re-run the playbook.
 4. `finish_restore`
    - waits for the restored etcd container and OpenShift etcd pod to appear
    - prints machine replacement instructions for lost non-restore control-plane machines
+   - waits for control-plane nodes to become `Ready`; if any stay `NotReady`, prints diagnostic commands and stops for manual intervention
    - forces redeployment of etcd, kube-apiserver, kube-controller-manager, and kube-scheduler
    - waits for ClusterOperators with `oc adm wait-for-stable-cluster`
    - prints final verification commands
+
+If nodes remain `NotReady` after automatic kubelet start, kubelet certificate
+recovery, and CSR handling, diagnose manually before continuing:
+
+```bash
+oc get nodes -o wide
+oc describe node <node>
+oc get csr
+oc get co
+ssh <node>
+sudo systemctl status kubelet.service
+sudo journalctl -u kubelet.service -b --no-pager | tail -200
+sudo crictl ps -a
+```
+
+At that point the likely causes are outside automatic CSR/kubelet certificate
+recovery: host networking/DNS/runtime health, a kubelet that cannot start, or a
+lost Machine that must be replaced.
 
 ## Updating the bundled restore script
 

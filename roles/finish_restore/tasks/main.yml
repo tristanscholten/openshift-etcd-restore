@@ -97,6 +97,55 @@
       - "  oc apply -f new-master-machine.yaml"
       - "Wait for the replacement node before recreating the next one."
 
+- name: Wait for control-plane nodes to become Ready
+  block:
+    - name: Wait for no NotReady control-plane nodes
+      ansible.builtin.shell: >-
+        set -o pipefail && oc get nodes
+        -l node-role.kubernetes.io/control-plane --no-headers |
+        awk '$2 != "Ready" {print $1}'
+      args:
+        executable: /bin/bash
+      register: not_ready_control_plane_nodes
+      changed_when: false
+      retries: "{{ restore_wait_retries }}"
+      delay: "{{ restore_wait_delay }}"
+      until: not_ready_control_plane_nodes.stdout_lines | length == 0
+  rescue:
+    - name: Capture NotReady control-plane nodes after automatic recovery
+      ansible.builtin.shell: >-
+        set -o pipefail && oc get nodes
+        -l node-role.kubernetes.io/control-plane --no-headers |
+        awk '$2 != "Ready" {print $1}'
+      args:
+        executable: /bin/bash
+      register: not_ready_control_plane_nodes
+      changed_when: false
+      failed_when: false
+
+    - name: Show NotReady control-plane diagnostic guidance
+      ansible.builtin.debug:
+        msg:
+          - "Manual intervention required: these control-plane nodes are still NotReady after automatic kubelet certificate recovery and CSR handling:"
+          - "{{ not_ready_control_plane_nodes.stdout_lines | default([]) }}"
+          - "Start with:"
+          - "  oc get nodes -o wide"
+          - "  oc describe node <node>"
+          - "  oc get csr"
+          - "  oc get co"
+          - "On the affected host:"
+          - "  sudo systemctl status kubelet.service"
+          - "  sudo journalctl -u kubelet.service -b --no-pager | tail -200"
+          - "  sudo crictl ps -a"
+          - "Check host networking/DNS/runtime health and whether the Machine must be replaced."
+
+    - name: Stop for manual NotReady node remediation
+      ansible.builtin.fail:
+        msg: >-
+          Control-plane nodes remain NotReady after automatic kubelet certificate
+          recovery. Diagnose and fix the affected hosts manually, then re-run
+          playbooks/restore.yml.
+
 - name: Force etcd redeployment
   ansible.builtin.command: >-
     oc patch etcd cluster

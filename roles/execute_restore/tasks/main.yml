@@ -160,14 +160,96 @@
     name: kubelet.service
     state: restarted
 
-- name: Show kubelet certificate recovery guidance
-  ansible.builtin.debug:
-    msg:
-      - "If a control-plane node stays NotReady after kubelet restart, follow the Kasten/OpenShift restore guidance:"
-      - "  sudo rm -f /var/lib/kubelet/pki/*.pem"
-      - "  sudo systemctl restart kubelet.service"
-      - "Then review and approve only valid pending CSRs."
-  run_once: true
+- name: Ensure kubelet is running on all control-plane nodes
+  block:
+    - name: Gather service facts before kubelet check
+      ansible.builtin.service_facts:
+
+    - name: Start kubelet when it is not running
+      ansible.builtin.systemd:
+        name: kubelet.service
+        state: started
+        enabled: true
+      when: >-
+        ansible_facts.services['kubelet.service'] is not defined or
+        ansible_facts.services['kubelet.service'].state != 'running'
+
+    - name: Gather service facts after kubelet start
+      ansible.builtin.service_facts:
+
+    - name: Verify kubelet is running
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services['kubelet.service'] is defined
+          - ansible_facts.services['kubelet.service'].state == 'running'
+        fail_msg: kubelet.service is not running after automatic start attempt.
+  rescue:
+    - name: Collect kubelet diagnostics after failed automatic start
+      ansible.builtin.shell: journalctl -u kubelet.service -b --no-pager | tail -200
+      args:
+        executable: /bin/bash
+      register: kubelet_journal_tail
+      changed_when: false
+      failed_when: false
+
+    - name: Show kubelet start diagnostic guidance
+      ansible.builtin.debug:
+        msg:
+          - "Manual intervention required: kubelet.service is not running on {{ inventory_hostname }}."
+          - "The playbook tried to start and enable kubelet.service automatically, but it is still not active."
+          - "Check on the affected host:"
+          - "  sudo systemctl status kubelet.service"
+          - "  sudo journalctl -u kubelet.service -b --no-pager | tail -200"
+          - "Recent kubelet journal lines captured by the playbook:"
+          - "{{ kubelet_journal_tail.stdout_lines | default([]) }}"
+
+    - name: Stop for manual kubelet remediation
+      ansible.builtin.fail:
+        msg: >-
+          kubelet.service is not running on {{ inventory_hostname }} after an
+          automatic start attempt. Fix kubelet manually, then re-run
+          playbooks/restore.yml.
+
+- name: Check node readiness after kubelet restart
+  ansible.builtin.command:
+    argv:
+      - oc
+      - get
+      - node
+      - "{{ hostvars[inventory_hostname].openshift_node_name | default(inventory_hostname) }}"
+      - -o
+      - 'jsonpath={range .status.conditions[?(@.type=="Ready")]}{.status}{end}'
+  register: node_ready_after_kubelet_restart
+  changed_when: false
+  failed_when: false
+  become: false
+  delegate_to: localhost
+  retries: 12
+  delay: 10
+  until: node_ready_after_kubelet_restart.rc == 0
+
+- name: Remove kubelet client certificates on NotReady control-plane nodes
+  ansible.builtin.shell: rm -f /var/lib/kubelet/pki/*.pem
+  args:
+    executable: /bin/bash
+  when:
+    - node_ready_after_kubelet_restart.rc == 0
+    - node_ready_after_kubelet_restart.stdout | trim != 'True'
+
+- name: Restart kubelet after certificate cleanup on recovered nodes
+  ansible.builtin.systemd:
+    name: kubelet.service
+    state: restarted
+  when:
+    - node_ready_after_kubelet_restart.rc == 0
+    - node_ready_after_kubelet_restart.stdout | trim != 'True'
+
+- name: Wait for kubelet CSRs after certificate cleanup
+  ansible.builtin.pause:
+    seconds: 30
+  when:
+    - node_ready_after_kubelet_restart.rc == 0
+    - node_ready_after_kubelet_restart.stdout | trim != 'True'
 
 - name: Restore execution stopped before CSR approval
   ansible.builtin.debug:
