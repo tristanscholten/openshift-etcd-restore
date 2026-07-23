@@ -111,6 +111,16 @@
   delegate_to: "{{ item }}"
   loop: "{{ groups['control_plane'] }}"
 
+- name: Ensure restore host path exists on restore node
+  ansible.builtin.file:
+    path: "{{ restore_host_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  become: true
+  delegate_to: "{{ restore_node_inventory_hostname }}"
+
 - name: Ensure Kasten restore namespace exists
   ansible.builtin.command: "oc create namespace {{ etcd_restore_namespace }}"
   register: create_restore_namespace

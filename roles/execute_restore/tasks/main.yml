@@ -122,8 +122,8 @@
   register: etcd_container_check
   changed_when: false
   failed_when: false
-  retries: 30
-  delay: 10
+  retries: "{{ static_pod_stop_retries }}"
+  delay: "{{ static_pod_stop_delay }}"
   until: etcd_container_check.rc != 0
   when: not restore_node_is_current_host | bool
 
@@ -144,8 +144,8 @@
   register: kube_apiserver_container_check
   changed_when: false
   failed_when: false
-  retries: 30
-  delay: 10
+  retries: "{{ static_pod_stop_retries }}"
+  delay: "{{ static_pod_stop_delay }}"
   until: kube_apiserver_container_check.rc != 0
   when: not restore_node_is_current_host | bool
 
@@ -160,14 +160,24 @@
 
 - name: Run modified cluster restore script on restore node
   ansible.builtin.command: "{{ restore_script_remote_path | basename }} {{ restore_host_path }}"
-  environment:
-    PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  environment: >-
+    {{ {'PATH': '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'} |
+       combine(restore_script_environment | default({})) }}
   when: restore_node_is_current_host | bool
 
 - name: Restart kubelet on all control-plane nodes
   ansible.builtin.systemd:
     name: "{{ kubelet_service_name }}"
     state: restarted
+
+- name: Show kubelet certificate recovery guidance
+  ansible.builtin.debug:
+    msg:
+      - "If a control-plane node stays NotReady after kubelet restart, follow the Kasten/OpenShift restore guidance:"
+      - "  sudo rm -f /var/lib/kubelet/pki/*.pem"
+      - "  sudo systemctl restart {{ kubelet_service_name }}"
+      - "Then review and approve only valid pending CSRs."
+  run_once: true
 
 - name: Restore execution stopped before CSR approval
   ansible.builtin.debug:

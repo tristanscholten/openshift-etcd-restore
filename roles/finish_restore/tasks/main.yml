@@ -67,9 +67,12 @@
     executable: /bin/bash
   register: restore_node_etcd_container
   changed_when: false
+  retries: "{{ finish_restore_etcd_container_retries }}"
+  delay: "{{ finish_restore_etcd_container_delay }}"
+  until: restore_node_etcd_container.rc == 0
   delegate_to: "{{ restore_node_inventory_hostname }}"
 
-- name: Verify OpenShift can see restored etcd pods
+- name: Wait for OpenShift to see restored etcd pods
   ansible.builtin.shell: >-
     set -o pipefail && oc get pods -n {{ etcd_namespace }} |
     grep -v etcd-quorum-guard | grep etcd
@@ -77,7 +80,9 @@
     executable: /bin/bash
   register: etcd_pods_after_restore
   changed_when: false
-  failed_when: false
+  retries: "{{ finish_restore_etcd_pod_retries }}"
+  delay: "{{ finish_restore_etcd_pod_delay }}"
+  until: etcd_pods_after_restore.rc == 0
 
 - name: Show manual machine replacement instructions
   ansible.builtin.debug:
@@ -127,11 +132,25 @@
   register: etcd_progress
   changed_when: false
 
+- name: Wait for stable OpenShift cluster operators
+  ansible.builtin.command:
+    argv:
+      - oc
+      - adm
+      - wait-for-stable-cluster
+      - --minimum-stable-period
+      - "{{ finish_restore_stable_cluster_minimum_period }}"
+      - --timeout
+      - "{{ finish_restore_stable_cluster_timeout }}"
+  changed_when: false
+  when: finish_restore_wait_for_stable_cluster | bool
+
 - name: Show final verification commands
   ansible.builtin.debug:
     msg:
       - "etcd progress: {{ etcd_progress.stdout_lines }}"
       - "Final checks:"
+      - "  oc adm wait-for-stable-cluster"
       - "  oc get nodes -w"
       - "  oc get pods -n openshift-etcd | grep -v etcd-quorum-guard | grep etcd"
       - "  oc get kubeapiserver kubecontrollermanager kubescheduler -o yaml"

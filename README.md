@@ -12,6 +12,23 @@ A small Ansible wrapper around the Veeam Kasten Kanister OpenShift etcd restore 
 > [!CAUTION]
 > This is disaster-recovery automation. It stops static control-plane pods, moves etcd data on non-restore control-plane nodes, runs the bundled OpenShift `cluster-restore.sh`, handles CSRs, and forces control-plane redeployments. Do not run it casually.
 
+## Out-of-box reality
+
+This repository is not a one-command restore for a random cluster. It is an
+automation wrapper around the documented Veeam Kasten/OpenShift flow. It expects
+the cluster and inventory to be prepared exactly:
+
+- one, and only one, control-plane node is labeled `etcd-restore=true`
+- that same node has `node-role.kubernetes.io/control-plane`
+- the inventory `control_plane` group maps SSH hosts to OpenShift node names
+- the Kasten etcd Blueprint, policy, restore point, and restore namespace exist
+- the operator has validated that this is the correct recovery host and backup
+
+The playbook now creates the restore host path, prepares the PV/PVC, waits longer
+for static pods and etcd recovery, and waits for stable ClusterOperators after
+forced redeployments. Human judgement is still required for Kasten restore point
+selection, CSR validation, and lost-machine replacement.
+
 ## Shape
 
 One playbook:
@@ -125,7 +142,28 @@ Operational constants live in role defaults, not inventory:
 | `execute_restore` | `etcd_data_dir: /var/lib/etcd` |
 | `execute_restore` | `crictl_path: crictl` |
 | `execute_restore` | `kubelet_service_name: kubelet.service` |
+| `execute_restore` | `static_pod_stop_retries: 90` |
+| `execute_restore` | `static_pod_stop_delay: 10` |
+| `execute_restore` | `restore_script_environment: {}` |
 | `finish_restore` | `crictl_path: crictl` |
+| `finish_restore` | `finish_restore_etcd_container_retries: 90` |
+| `finish_restore` | `finish_restore_etcd_container_delay: 10` |
+| `finish_restore` | `finish_restore_etcd_pod_retries: 90` |
+| `finish_restore` | `finish_restore_etcd_pod_delay: 10` |
+| `finish_restore` | `finish_restore_wait_for_stable_cluster: true` |
+| `finish_restore` | `finish_restore_stable_cluster_minimum_period: 1m` |
+| `finish_restore` | `finish_restore_stable_cluster_timeout: 30m` |
+
+If the cluster-wide proxy is enabled, pass proxy variables through
+`restore_script_environment`, matching OpenShift's `sudo -E cluster-restore.sh`
+guidance:
+
+```yaml
+restore_script_environment:
+  HTTP_PROXY: http://proxy.example.com:8080
+  HTTPS_PROXY: http://proxy.example.com:8080
+  NO_PROXY: .cluster.local,.svc,10.0.0.0/8
+```
 
 ## Kasten restore-download phase
 
@@ -206,10 +244,12 @@ Approve valid CSRs manually, then re-run the playbook.
 2. `execute_restore`
    - requires `i_understand_this_is_destructive=true`
    - stops etcd and kube-apiserver static pods on non-restore control-plane nodes
+   - waits up to 15 minutes for those static pod containers to stop
    - moves old `/var/lib/etcd` aside on non-restore nodes
    - copies the bundled `cluster-restore.sh` to `/usr/local/bin/cluster-restore.sh` on the restore node over SSH
    - runs `cluster-restore.sh /mnt/data` on the restore node
    - restarts kubelet on all control-plane nodes
+   - prints the Kasten/OpenShift kubelet certificate recovery step for nodes that stay `NotReady`: remove `/var/lib/kubelet/pki/*.pem`, restart kubelet, then approve valid CSRs
 
 3. `approve_csrs`
    - lists pending CSRs
@@ -217,9 +257,10 @@ Approve valid CSRs manually, then re-run the playbook.
    - otherwise prints manual approval commands and stops if pending CSRs exist
 
 4. `finish_restore`
-   - verifies etcd container/pods
+   - waits for the restored etcd container and OpenShift etcd pod to appear
    - prints machine replacement instructions for lost non-restore control-plane machines
    - forces redeployment of etcd, kube-apiserver, kube-controller-manager, and kube-scheduler
+   - waits for ClusterOperators with `oc adm wait-for-stable-cluster`
    - prints final verification commands
 
 ## Updating the bundled restore script
