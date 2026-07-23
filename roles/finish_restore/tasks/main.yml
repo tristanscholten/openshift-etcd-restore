@@ -1,28 +1,64 @@
 ---
+- name: Discover OpenShift nodes labeled for etcd restore
+  ansible.builtin.command:
+    argv:
+      - oc
+      - get
+      - nodes
+      - -l
+      - "{{ restore_node_label_key }}={{ restore_node_label_value }}"
+      - -o
+      - 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}'
+  register: restore_node_label_query
+  changed_when: false
+
+- name: Verify exactly one restore node is labeled
+  ansible.builtin.assert:
+    that:
+      - restore_node_label_query.stdout_lines | length == 1
+    fail_msg: >-
+      Exactly one control-plane node must have the label
+      {{ restore_node_label_key }}={{ restore_node_label_value }}. Found
+      {{ restore_node_label_query.stdout_lines | length }} labeled nodes:
+      {{ restore_node_label_query.stdout_lines | default([]) | join(', ') }}.
+
+- name: Set labeled restore node name
+  ansible.builtin.set_fact:
+    restore_node_name: "{{ restore_node_label_query.stdout_lines[0] }}"
+
+- name: Verify labeled restore node is a control-plane node
+  ansible.builtin.command: >-
+    oc get node {{ restore_node_name }}
+    -l node-role.kubernetes.io/master
+    -o name
+  register: restore_node_control_plane_check
+  changed_when: false
+  failed_when: restore_node_control_plane_check.stdout_lines | length != 1
+
 - name: Initialize restore-node host list
   ansible.builtin.set_fact:
     restore_node_inventory_hosts: []
 
-- name: Collect restore-node hosts from inventory
+- name: Match labeled restore node to inventory host
   ansible.builtin.set_fact:
     restore_node_inventory_hosts: "{{ restore_node_inventory_hosts + [item] }}"
   loop: "{{ groups['control_plane'] | default([]) }}"
-  when: hostvars[item].openshift_etcd_restore_node | default(false) | bool
+  when: (hostvars[item].openshift_node_name | default(item)) == restore_node_name
 
-- name: Verify exactly one restore node is configured
+- name: Verify labeled restore node exists once in inventory
   ansible.builtin.assert:
     that:
       - restore_node_inventory_hosts | length == 1
     fail_msg: >-
-      Set openshift_etcd_restore_node: true on exactly one host in the
-      control_plane inventory group.
+      The node labeled {{ restore_node_label_key }}={{ restore_node_label_value }}
+      is {{ restore_node_name }}, but it does not map to exactly one host in the
+      control_plane inventory group. Set openshift_node_name on the matching
+      inventory host when the SSH inventory name differs from the OpenShift node
+      name.
 
 - name: Set restore-node facts
   ansible.builtin.set_fact:
     restore_node_inventory_hostname: "{{ restore_node_inventory_hosts[0] }}"
-    restore_node_name: >-
-      {{ hostvars[restore_node_inventory_hosts[0]].openshift_node_name |
-         default(restore_node_inventory_hosts[0]) }}
 
 - name: Verify etcd container is running on restore node
   ansible.builtin.shell: >-
