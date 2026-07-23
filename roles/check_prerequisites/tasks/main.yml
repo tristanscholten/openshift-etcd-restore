@@ -106,7 +106,7 @@
 
 - name: Verify SSH, sudo, crictl, and static-pod path on control-plane nodes
   ansible.builtin.raw: >-
-    sudo -n true && command -v {{ crictl_path }} && test -d {{ static_pod_path }} && test -d /usr/local/bin
+    sudo -n true && command -v crictl && test -d /etc/kubernetes/manifests && test -d /usr/local/bin
   changed_when: false
   delegate_to: "{{ item }}"
   loop: "{{ groups['control_plane'] }}"

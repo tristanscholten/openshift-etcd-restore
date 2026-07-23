@@ -88,6 +88,12 @@ Workstation:
 - the bundled OpenShift `cluster-restore.sh` from `roles/execute_restore/files/`
   - source: <https://github.com/openshift/cluster-etcd-operator/blob/main/bindata/etcd/cluster-restore.sh>
 
+Control-plane hosts:
+
+- `crictl` available in the standard command path
+- standard OpenShift paths/services available: `/etc/kubernetes/manifests`,
+  `/var/lib/etcd`, and `kubelet.service`
+
 Cluster/Kasten:
 
 - Kasten installed, default namespace `kasten-io`
@@ -137,39 +143,17 @@ Operational constants live in role defaults, not inventory:
 | `check_prerequisites` | `restore_node_label_key: etcd-restore` |
 | `check_prerequisites` | `restore_node_label_value: "true"` |
 | `check_prerequisites` | `restore_host_path: /mnt/data` |
-| `check_prerequisites` | `static_pod_path: /etc/kubernetes/manifests` |
-| `check_prerequisites` | `crictl_path: crictl` |
-| `execute_restore` | `restore_script_source: cluster-restore.sh` |
-| `execute_restore` | `restore_script_remote_path: /usr/local/bin/cluster-restore.sh` |
+| `execute_restore` | `restore_script_path: /usr/local/bin/cluster-restore.sh` |
 | `execute_restore` | `restore_host_path: /mnt/data` |
-| `execute_restore` | `static_pod_path: /etc/kubernetes/manifests` |
-| `execute_restore` | `etcd_static_pod_manifest: /etc/kubernetes/manifests/etcd-pod.yaml` |
-| `execute_restore` | `kube_apiserver_static_pod_manifest: /etc/kubernetes/manifests/kube-apiserver-pod.yaml` |
-| `execute_restore` | `etcd_data_dir: /var/lib/etcd` |
-| `execute_restore` | `crictl_path: crictl` |
-| `execute_restore` | `kubelet_service_name: kubelet.service` |
-| `execute_restore` | `static_pod_stop_retries: 90` |
-| `execute_restore` | `static_pod_stop_delay: 10` |
-| `execute_restore` | `restore_script_environment: {}` |
-| `finish_restore` | `crictl_path: crictl` |
-| `finish_restore` | `finish_restore_etcd_container_retries: 90` |
-| `finish_restore` | `finish_restore_etcd_container_delay: 10` |
-| `finish_restore` | `finish_restore_etcd_pod_retries: 90` |
-| `finish_restore` | `finish_restore_etcd_pod_delay: 10` |
+| `execute_restore` / `finish_restore` | `restore_wait_retries: 90` |
+| `execute_restore` / `finish_restore` | `restore_wait_delay: 10` |
 | `finish_restore` | `finish_restore_wait_for_stable_cluster: true` |
 | `finish_restore` | `finish_restore_stable_cluster_minimum_period: 1m` |
 | `finish_restore` | `finish_restore_stable_cluster_timeout: 30m` |
 
-If the cluster-wide proxy is enabled, pass proxy variables through
-`restore_script_environment`, matching OpenShift's `sudo -E cluster-restore.sh`
-guidance:
-
-```yaml
-restore_script_environment:
-  HTTP_PROXY: http://proxy.example.com:8080
-  HTTPS_PROXY: http://proxy.example.com:8080
-  NO_PROXY: .cluster.local,.svc,10.0.0.0/8
-```
+OpenShift host paths and services used by the restore procedure are intentionally
+hardcoded to the standard locations: `/etc/kubernetes/manifests`,
+`/var/lib/etcd`, and `kubelet.service`.
 
 ## Kasten restore-download phase
 

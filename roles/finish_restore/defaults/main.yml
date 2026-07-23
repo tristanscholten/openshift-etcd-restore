@@ -4,15 +4,10 @@
 restore_node_label_key: etcd-restore
 restore_node_label_value: "true"
 
-# Fixed command used to inspect the restored etcd container on the restore node.
-crictl_path: crictl
-
-# Post-restore recovery can take a while. OpenShift docs state that control
-# plane recovery can take up to 15 minutes; keep waits above that.
-finish_restore_etcd_container_retries: 90
-finish_restore_etcd_container_delay: 10
-finish_restore_etcd_pod_retries: 90
-finish_restore_etcd_pod_delay: 10
+# Post-restore recovery can take a while. 90 retries with a 10 second delay gives
+# a 15 minute wait, matching the expected OpenShift control-plane recovery range.
+restore_wait_retries: 90
+restore_wait_delay: 10
 
 # Wait for ClusterOperators after forced redeployments. This mirrors current
 # OpenShift guidance to run `oc adm wait-for-stable-cluster` after recovery.

@@ -62,13 +62,13 @@
 
 - name: Verify etcd container is running on restore node
   ansible.builtin.shell: >-
-    set -o pipefail && sudo {{ crictl_path }} ps | grep etcd | grep -v operator
+    set -o pipefail && sudo crictl ps | grep etcd | grep -v operator
   args:
     executable: /bin/bash
   register: restore_node_etcd_container
   changed_when: false
-  retries: "{{ finish_restore_etcd_container_retries }}"
-  delay: "{{ finish_restore_etcd_container_delay }}"
+  retries: "{{ restore_wait_retries }}"
+  delay: "{{ restore_wait_delay }}"
   until: restore_node_etcd_container.rc == 0
   delegate_to: "{{ restore_node_inventory_hostname }}"
 
@@ -80,8 +80,8 @@
     executable: /bin/bash
   register: etcd_pods_after_restore
   changed_when: false
-  retries: "{{ finish_restore_etcd_pod_retries }}"
-  delay: "{{ finish_restore_etcd_pod_delay }}"
+  retries: "{{ restore_wait_retries }}"
+  delay: "{{ restore_wait_delay }}"
   until: etcd_pods_after_restore.rc == 0
 
 - name: Show manual machine replacement instructions

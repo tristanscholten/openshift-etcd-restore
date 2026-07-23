@@ -91,8 +91,8 @@
 
 - name: Copy restore script to restore node over SSH
   ansible.builtin.copy:
-    src: "{{ restore_script_source }}"
-    dest: "{{ restore_script_remote_path }}"
+    src: "{{ restore_script_path | basename }}"
+    dest: "{{ restore_script_path }}"
     owner: root
     group: root
     mode: '0700'
@@ -100,67 +100,64 @@
 
 - name: Move etcd static pod manifest away on non-restore nodes
   ansible.builtin.command: >-
-    mv {{ etcd_static_pod_manifest }}
+    mv /etc/kubernetes/manifests/etcd-pod.yaml
     /tmp/etcd-pod.yaml.{{ restore_timestamp }}
   args:
-    removes: "{{ etcd_static_pod_manifest }}"
+    removes: /etc/kubernetes/manifests/etcd-pod.yaml
     creates: "/tmp/etcd-pod.yaml.{{ restore_timestamp }}"
   when: not restore_node_is_current_host | bool
 
 - name: Wait for etcd static pod containers to stop on non-restore nodes
   ansible.builtin.shell: >-
-    set -o pipefail && {{ crictl_path }} ps | grep etcd | grep -v operator
+    set -o pipefail && crictl ps | grep etcd | grep -v operator
   args:
     executable: /bin/bash
   register: etcd_container_check
   changed_when: false
   failed_when: false
-  retries: "{{ static_pod_stop_retries }}"
-  delay: "{{ static_pod_stop_delay }}"
+  retries: "{{ restore_wait_retries }}"
+  delay: "{{ restore_wait_delay }}"
   until: etcd_container_check.rc != 0
   when: not restore_node_is_current_host | bool
 
 - name: Move kube-apiserver static pod manifest away on non-restore nodes
   ansible.builtin.command: >-
-    mv {{ kube_apiserver_static_pod_manifest }}
+    mv /etc/kubernetes/manifests/kube-apiserver-pod.yaml
     /tmp/kube-apiserver-pod.yaml.{{ restore_timestamp }}
   args:
-    removes: "{{ kube_apiserver_static_pod_manifest }}"
+    removes: /etc/kubernetes/manifests/kube-apiserver-pod.yaml
     creates: "/tmp/kube-apiserver-pod.yaml.{{ restore_timestamp }}"
   when: not restore_node_is_current_host | bool
 
 - name: Wait for kube-apiserver static pod containers to stop on non-restore nodes
   ansible.builtin.shell: >-
-    set -o pipefail && {{ crictl_path }} ps | grep kube-apiserver | grep -v operator
+    set -o pipefail && crictl ps | grep kube-apiserver | grep -v operator
   args:
     executable: /bin/bash
   register: kube_apiserver_container_check
   changed_when: false
   failed_when: false
-  retries: "{{ static_pod_stop_retries }}"
-  delay: "{{ static_pod_stop_delay }}"
+  retries: "{{ restore_wait_retries }}"
+  delay: "{{ restore_wait_delay }}"
   until: kube_apiserver_container_check.rc != 0
   when: not restore_node_is_current_host | bool
 
 - name: Move old etcd data directory aside on non-restore nodes
   ansible.builtin.command: >-
-    mv {{ etcd_data_dir }}
+    mv /var/lib/etcd
     /tmp/etcd.{{ restore_timestamp }}
   args:
-    removes: "{{ etcd_data_dir }}"
+    removes: /var/lib/etcd
     creates: "/tmp/etcd.{{ restore_timestamp }}"
   when: not restore_node_is_current_host | bool
 
 - name: Run modified cluster restore script on restore node
-  ansible.builtin.command: "{{ restore_script_remote_path | basename }} {{ restore_host_path }}"
-  environment: >-
-    {{ {'PATH': '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'} |
-       combine(restore_script_environment | default({})) }}
+  ansible.builtin.command: "{{ restore_script_path }} {{ restore_host_path }}"
   when: restore_node_is_current_host | bool
 
 - name: Restart kubelet on all control-plane nodes
   ansible.builtin.systemd:
-    name: "{{ kubelet_service_name }}"
+    name: kubelet.service
     state: restarted
 
 - name: Show kubelet certificate recovery guidance
@@ -168,7 +165,7 @@
     msg:
       - "If a control-plane node stays NotReady after kubelet restart, follow the Kasten/OpenShift restore guidance:"
       - "  sudo rm -f /var/lib/kubelet/pki/*.pem"
-      - "  sudo systemctl restart {{ kubelet_service_name }}"
+      - "  sudo systemctl restart kubelet.service"
       - "Then review and approve only valid pending CSRs."
   run_once: true
 

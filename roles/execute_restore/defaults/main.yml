@@ -4,26 +4,14 @@
 restore_node_label_key: etcd-restore
 restore_node_label_value: "true"
 
-# Bundled restore script in roles/execute_restore/files/.
-restore_script_source: cluster-restore.sh
-restore_script_remote_path: /usr/local/bin/cluster-restore.sh
+# Bundled restore script in roles/execute_restore/files/. The basename is used as
+# the local role file name and the full path is used as the remote destination.
+restore_script_path: /usr/local/bin/cluster-restore.sh
 
 # Fixed OpenShift/Kasten restore staging path.
 restore_host_path: /mnt/data
 
-# Fixed control-plane paths/commands used by the OpenShift restore procedure.
-static_pod_path: /etc/kubernetes/manifests
-etcd_static_pod_manifest: /etc/kubernetes/manifests/etcd-pod.yaml
-kube_apiserver_static_pod_manifest: /etc/kubernetes/manifests/kube-apiserver-pod.yaml
-etcd_data_dir: /var/lib/etcd
-crictl_path: crictl
-kubelet_service_name: kubelet.service
-
-# OpenShift static pods can take several minutes to terminate during disaster
-# recovery. OpenShift docs show long kube-apiserver stop waits; use 15 minutes.
-static_pod_stop_retries: 90
-static_pod_stop_delay: 10
-
-# Extra environment passed to cluster-restore.sh. Set proxy variables here when
-# the cluster-wide proxy is enabled, matching OpenShift's sudo -E guidance.
-restore_script_environment: {}
+# OpenShift static pods and etcd pods can take several minutes to settle during
+# disaster recovery. 90 retries with a 10 second delay gives a 15 minute wait.
+restore_wait_retries: 90
+restore_wait_delay: 10
