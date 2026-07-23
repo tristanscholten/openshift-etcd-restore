@@ -1,4 +1,9 @@
 ---
+# Kasten restore pod nodeSelector label. The selected restore node must already
+# have this label before the destructive host-side restore starts.
+restore_node_label_key: etcd-restore
+restore_node_label_value: "true"
+
 # Bundled restore script in roles/execute_restore/files/.
 restore_script_source: cluster-restore.sh
 restore_script_remote_path: /usr/local/bin/cluster-restore.sh

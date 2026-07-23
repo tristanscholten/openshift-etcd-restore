@@ -1,3 +1,8 @@
 ---
+# Kasten restore pod nodeSelector label. The selected restore node must still be
+# the only control-plane node with this label during finish/redeployment.
+restore_node_label_key: etcd-restore
+restore_node_label_value: "true"
+
 # Fixed command used to inspect the restored etcd container on the restore node.
 crictl_path: crictl

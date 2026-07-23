@@ -29,7 +29,8 @@ roles/approve_csrs          # auto-approve CSRs or print manual commands and sto
 roles/finish_restore        # force remaining control-plane redeployments and print final checks
 ```
 
-The restore node is selected in inventory, not in `group_vars`:
+The restore node is selected from the OpenShift node label
+`etcd-restore=true`. The inventory only maps SSH hosts to OpenShift node names:
 
 ```yaml
 all:
@@ -39,18 +40,23 @@ all:
         master-0.example.com:
           ansible_host: 10.0.0.10
           openshift_node_name: master-0.example.com
-          openshift_etcd_restore_node: true
         master-1.example.com:
           ansible_host: 10.0.0.11
           openshift_node_name: master-1.example.com
-          openshift_etcd_restore_node: false
         master-2.example.com:
           ansible_host: 10.0.0.12
           openshift_node_name: master-2.example.com
-          openshift_etcd_restore_node: false
 ```
 
-Exactly one `control_plane` host must have `openshift_etcd_restore_node: true`.
+Exactly one control-plane node must have the label:
+
+```bash
+oc label node master-0.example.com etcd-restore=true --overwrite
+```
+
+If zero or multiple nodes have the label, the playbook stops before restore
+work. If the SSH inventory hostname differs from the OpenShift node name, set
+`openshift_node_name` on that inventory host.
 
 ## Prerequisites
 
@@ -68,7 +74,7 @@ Cluster/Kasten:
 - OpenShift etcd pods in `openshift-etcd`
 - Kasten Kanister etcd Blueprint applied
 - a successful etcd restore point
-- a selected restore control-plane node
+- exactly one control-plane node labeled `etcd-restore=true`
 
 ## Configure
 
@@ -121,7 +127,10 @@ Operational constants live in role defaults, not inventory:
 
 ## Kasten restore-download phase
 
-The playbook prepares the target namespace/PV/PVC and labels the restore node. The actual Kasten restore selection remains a manual dashboard action because you must choose the correct restore point.
+The playbook prepares the target namespace/PV/PVC and uses the existing
+`etcd-restore=true` node label to identify the restore node. The actual Kasten
+restore selection remains a manual dashboard action because you must choose the
+correct restore point.
 
 The relevant restore phase from the Kasten Blueprint is:
 
@@ -188,7 +197,8 @@ Approve valid CSRs manually, then re-run the playbook.
    - verifies Kasten and etcd namespaces
    - verifies etcd pods are discoverable
    - verifies SSH/sudo/crictl/static pod access on all control-plane hosts
-   - ensures the restore namespace, PV, PVC, and restore-node label exist
+   - ensures the restore namespace, PV, and PVC exist
+   - verifies exactly one control-plane node has the restore-node label
    - verifies the Kasten restore has downloaded the etcd backup to the restore node
 
 2. `execute_restore`
