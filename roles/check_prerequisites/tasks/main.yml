@@ -111,80 +111,44 @@
   delegate_to: "{{ item }}"
   loop: "{{ groups['control_plane'] }}"
 
-- name: Ensure Kasten restore namespace exists
-  ansible.builtin.command: "oc create namespace {{ etcd_restore_namespace }}"
-  register: create_restore_namespace
-  changed_when: create_restore_namespace.rc == 0
-  failed_when: >-
-    create_restore_namespace.rc != 0 and
-    'AlreadyExists' not in create_restore_namespace.stderr
+- name: Ensure restore host path exists on restore node
+  ansible.builtin.file:
+    path: "{{ restore_host_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  become: true
+  delegate_to: "{{ restore_node_inventory_hostname }}"
 
-- name: Apply restore PersistentVolume
-  ansible.builtin.command:
-    argv:
-      - oc
-      - apply
-      - -f
-      - -
-  args:
-    stdin: |
-      apiVersion: v1
-      kind: PersistentVolume
-      metadata:
-        name: {{ restore_pv_name }}
-        labels:
-          app.kubernetes.io/name: openshift-etcd-restore
-      spec:
-        storageClassName: ""
-        capacity:
-          storage: {{ restore_storage_size }}
-        accessModes:
-          - ReadWriteOnce
-        persistentVolumeReclaimPolicy: Retain
-        hostPath:
-          path: {{ restore_host_path | quote }}
-  register: apply_restore_pv
-  changed_when: >-
-    'created' in apply_restore_pv.stdout or
-    'configured' in apply_restore_pv.stdout
+- name: Verify Kasten restore namespace exists
+  ansible.builtin.command: "oc get namespace {{ etcd_restore_namespace }} -o name"
+  changed_when: false
 
-- name: Apply restore PersistentVolumeClaim
-  ansible.builtin.command:
-    argv:
-      - oc
-      - apply
-      - -f
-      - -
-  args:
-    stdin: |
-      apiVersion: v1
-      kind: PersistentVolumeClaim
-      metadata:
-        name: {{ restore_pvc_name }}
-        namespace: {{ etcd_restore_namespace }}
-        labels:
-          app.kubernetes.io/name: openshift-etcd-restore
-      spec:
-        storageClassName: ""
-        accessModes:
-          - ReadWriteOnce
-        resources:
-          requests:
-            storage: {{ restore_storage_size }}
-  register: apply_restore_pvc
-  changed_when: >-
-    'created' in apply_restore_pvc.stdout or
-    'configured' in apply_restore_pvc.stdout
+- name: Verify restore PersistentVolume exists
+  ansible.builtin.command: "oc get pv {{ restore_pv_name }} -o name"
+  changed_when: false
 
-- name: Wait for restore PVC to bind
+- name: Verify restore PersistentVolume host path
+  ansible.builtin.command: >-
+    oc get pv {{ restore_pv_name }}
+    -o jsonpath='{.spec.hostPath.path}'
+  register: restore_pv_host_path
+  changed_when: false
+  failed_when: restore_pv_host_path.stdout | trim != restore_host_path
+
+- name: Verify restore PersistentVolumeClaim exists
+  ansible.builtin.command: >-
+    oc get pvc {{ restore_pvc_name }} -n {{ etcd_restore_namespace }} -o name
+  changed_when: false
+
+- name: Verify restore PVC is bound
   ansible.builtin.command: >-
     oc get pvc {{ restore_pvc_name }} -n {{ etcd_restore_namespace }}
     -o jsonpath='{.status.phase}'
   register: restore_pvc_phase
   changed_when: false
-  retries: 30
-  delay: 10
-  until: restore_pvc_phase.stdout == 'Bound'
+  failed_when: restore_pvc_phase.stdout != 'Bound'
 
 - name: Show required Kasten restore-download step
   ansible.builtin.debug:

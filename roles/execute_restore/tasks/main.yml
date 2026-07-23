@@ -23,25 +23,20 @@
   changed_when: false
   become: false
   delegate_to: localhost
-  run_once: true
 
 - name: Verify exactly one restore node is labeled
   ansible.builtin.assert:
     that:
-      - hostvars[ansible_play_hosts_all[0]].restore_node_label_query.stdout_lines | length == 1
+      - restore_node_label_query.stdout_lines | length == 1
     fail_msg: >-
       Exactly one control-plane node must have the label
       {{ restore_node_label_key }}={{ restore_node_label_value }}. Found
-      {{ hostvars[ansible_play_hosts_all[0]].restore_node_label_query.stdout_lines | length }}
-      labeled nodes:
-      {{ hostvars[ansible_play_hosts_all[0]].restore_node_label_query.stdout_lines |
-         default([]) | join(', ') }}.
-  run_once: true
+      {{ restore_node_label_query.stdout_lines | length }} labeled nodes:
+      {{ restore_node_label_query.stdout_lines | default([]) | join(', ') }}.
 
 - name: Set labeled restore node name
   ansible.builtin.set_fact:
-    restore_node_name: >-
-      {{ hostvars[ansible_play_hosts_all[0]].restore_node_label_query.stdout_lines[0] }}
+    restore_node_name: "{{ restore_node_label_query.stdout_lines[0] }}"
 
 - name: Verify labeled restore node is a control-plane node
   ansible.builtin.command: >-
@@ -53,7 +48,6 @@
   failed_when: restore_node_control_plane_check.stdout_lines | length != 1
   become: false
   delegate_to: localhost
-  run_once: true
 
 - name: Initialize restore-node host list
   ansible.builtin.set_fact:
@@ -85,7 +79,6 @@
 - name: Capture restore timestamp
   ansible.builtin.set_fact:
     restore_timestamp: "{{ lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ') }}"
-  run_once: true
 
 - name: Verify snapshot exists on restore node
   ansible.builtin.stat:
@@ -108,10 +101,10 @@
 - name: Move etcd static pod manifest away on non-restore nodes
   ansible.builtin.command: >-
     mv {{ etcd_static_pod_manifest }}
-    /tmp/etcd-pod.yaml.{{ hostvars[groups['control_plane'][0]].restore_timestamp }}
+    /tmp/etcd-pod.yaml.{{ restore_timestamp }}
   args:
     removes: "{{ etcd_static_pod_manifest }}"
-    creates: "/tmp/etcd-pod.yaml.{{ hostvars[groups['control_plane'][0]].restore_timestamp }}"
+    creates: "/tmp/etcd-pod.yaml.{{ restore_timestamp }}"
   when: not restore_node_is_current_host | bool
 
 - name: Wait for etcd static pod containers to stop on non-restore nodes
@@ -122,18 +115,18 @@
   register: etcd_container_check
   changed_when: false
   failed_when: false
-  retries: 30
-  delay: 10
+  retries: "{{ static_pod_stop_retries }}"
+  delay: "{{ static_pod_stop_delay }}"
   until: etcd_container_check.rc != 0
   when: not restore_node_is_current_host | bool
 
 - name: Move kube-apiserver static pod manifest away on non-restore nodes
   ansible.builtin.command: >-
     mv {{ kube_apiserver_static_pod_manifest }}
-    /tmp/kube-apiserver-pod.yaml.{{ hostvars[groups['control_plane'][0]].restore_timestamp }}
+    /tmp/kube-apiserver-pod.yaml.{{ restore_timestamp }}
   args:
     removes: "{{ kube_apiserver_static_pod_manifest }}"
-    creates: "/tmp/kube-apiserver-pod.yaml.{{ hostvars[groups['control_plane'][0]].restore_timestamp }}"
+    creates: "/tmp/kube-apiserver-pod.yaml.{{ restore_timestamp }}"
   when: not restore_node_is_current_host | bool
 
 - name: Wait for kube-apiserver static pod containers to stop on non-restore nodes
@@ -144,30 +137,40 @@
   register: kube_apiserver_container_check
   changed_when: false
   failed_when: false
-  retries: 30
-  delay: 10
+  retries: "{{ static_pod_stop_retries }}"
+  delay: "{{ static_pod_stop_delay }}"
   until: kube_apiserver_container_check.rc != 0
   when: not restore_node_is_current_host | bool
 
 - name: Move old etcd data directory aside on non-restore nodes
   ansible.builtin.command: >-
     mv {{ etcd_data_dir }}
-    /tmp/etcd.{{ hostvars[groups['control_plane'][0]].restore_timestamp }}
+    /tmp/etcd.{{ restore_timestamp }}
   args:
     removes: "{{ etcd_data_dir }}"
-    creates: "/tmp/etcd.{{ hostvars[groups['control_plane'][0]].restore_timestamp }}"
+    creates: "/tmp/etcd.{{ restore_timestamp }}"
   when: not restore_node_is_current_host | bool
 
 - name: Run modified cluster restore script on restore node
   ansible.builtin.command: "{{ restore_script_remote_path | basename }} {{ restore_host_path }}"
-  environment:
-    PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  environment: >-
+    {{ {'PATH': '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'} |
+       combine(restore_script_environment | default({})) }}
   when: restore_node_is_current_host | bool
 
 - name: Restart kubelet on all control-plane nodes
   ansible.builtin.systemd:
     name: "{{ kubelet_service_name }}"
     state: restarted
+
+- name: Show kubelet certificate recovery guidance
+  ansible.builtin.debug:
+    msg:
+      - "If a control-plane node stays NotReady after kubelet restart, follow the Kasten/OpenShift restore guidance:"
+      - "  sudo rm -f /var/lib/kubelet/pki/*.pem"
+      - "  sudo systemctl restart {{ kubelet_service_name }}"
+      - "Then review and approve only valid pending CSRs."
+  run_once: true
 
 - name: Restore execution stopped before CSR approval
   ansible.builtin.debug:
