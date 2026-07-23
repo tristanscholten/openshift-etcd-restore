@@ -29,7 +29,7 @@
 - name: Verify labeled restore node is a control-plane node
   ansible.builtin.command: >-
     oc get node {{ restore_node_name }}
-    -l node-role.kubernetes.io/master
+    -l node-role.kubernetes.io/control-plane
     -o name
   register: restore_node_control_plane_check
   changed_when: false
