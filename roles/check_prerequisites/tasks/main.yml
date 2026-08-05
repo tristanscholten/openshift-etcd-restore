@@ -80,12 +80,14 @@
   changed_when: false
   failed_when: cluster_admin_check.stdout | trim != 'yes'
 
-- name: Verify required namespaces
-  ansible.builtin.command: "oc get namespace {{ item }} -o name"
+- name: Verify OpenShift etcd namespace exists
+  ansible.builtin.command: "oc get namespace {{ etcd_namespace }} -o name"
   changed_when: false
-  loop:
-    - "{{ kasten_namespace }}"
-    - "{{ etcd_namespace }}"
+
+- name: Verify Kasten namespace exists
+  ansible.builtin.command: "oc get namespace {{ kasten_namespace }} -o name"
+  changed_when: false
+  when: restore_require_kasten_download_prerequisites | bool
 
 - name: Verify etcd pods are discoverable
   ansible.builtin.command: >-
@@ -126,10 +128,12 @@
 - name: Verify Kasten restore namespace exists
   ansible.builtin.command: "oc get namespace {{ etcd_restore_namespace }} -o name"
   changed_when: false
+  when: restore_require_kasten_download_prerequisites | bool
 
 - name: Verify restore PersistentVolume exists
   ansible.builtin.command: "oc get pv {{ restore_pv_name }} -o name"
   changed_when: false
+  when: restore_require_kasten_download_prerequisites | bool
 
 - name: Verify restore PersistentVolume host path
   ansible.builtin.command: >-
@@ -138,11 +142,13 @@
   register: restore_pv_host_path
   changed_when: false
   failed_when: restore_pv_host_path.stdout | trim != restore_host_path
+  when: restore_require_kasten_download_prerequisites | bool
 
 - name: Verify restore PersistentVolumeClaim exists
   ansible.builtin.command: >-
     oc get pvc {{ restore_pvc_name }} -n {{ etcd_restore_namespace }} -o name
   changed_when: false
+  when: restore_require_kasten_download_prerequisites | bool
 
 - name: Verify restore PVC is bound
   ansible.builtin.command: >-
@@ -151,6 +157,7 @@
   register: restore_pvc_phase
   changed_when: false
   failed_when: restore_pvc_phase.stdout != 'Bound'
+  when: restore_require_kasten_download_prerequisites | bool
 
 - name: Show required Kasten restore-download step
   ansible.builtin.debug:
@@ -166,6 +173,7 @@
       - "# object store and copy it to the /mnt/data location of the PV mapped to PVC pvc-etcd."
       - "# The PV's mount path is /mnt/data on leader node where the cluster-ocp-restore.sh"
       - "# script would be executed."
+  when: restore_require_kasten_download_prerequisites | bool
 
 - name: Verify downloaded etcd backup exists on restore node
   ansible.builtin.stat:
