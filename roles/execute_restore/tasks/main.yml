@@ -43,7 +43,7 @@
       - 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}'
   register: restore_node_label_query
   changed_when: false
-  become: false
+  become: true
   delegate_to: localhost
 
 - name: Verify exactly one restore node is labeled
@@ -61,14 +61,16 @@
     restore_node_name: "{{ restore_node_label_query.stdout_lines[0] }}"
 
 - name: Verify labeled restore node is a control-plane node
-  ansible.builtin.command: >-
-    oc get node {{ restore_node_name }}
-    -l node-role.kubernetes.io/control-plane
-    -o name
+  ansible.builtin.shell: >-
+    set -o pipefail &&
+    oc get nodes -l node-role.kubernetes.io/control-plane -o name |
+    grep -Fx node/{{ restore_node_name }}
+  args:
+    executable: /bin/bash
   register: restore_node_control_plane_check
   changed_when: false
   failed_when: restore_node_control_plane_check.stdout_lines | length != 1
-  become: false
+  become: true
   delegate_to: localhost
 
 - name: Initialize restore-node host list
@@ -175,6 +177,8 @@
 
 - name: Run modified cluster restore script on restore node
   ansible.builtin.command: "{{ restore_script_path }} {{ restore_host_path }}"
+  environment: >-
+    {{ {'ETCD_ETCDCTL_RESTORE': '1'} if restore_use_etcdctl_restore | bool else {} }}
   when: restore_node_is_current_host | bool
 
 - name: Restart kubelet on all control-plane nodes
@@ -244,7 +248,7 @@
   register: node_ready_after_kubelet_restart
   changed_when: false
   failed_when: false
-  become: false
+  become: true
   delegate_to: localhost
   retries: 12
   delay: 10

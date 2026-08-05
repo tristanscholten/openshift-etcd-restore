@@ -11,6 +11,13 @@ restore_wait_delay: 10
 
 # Wait for ClusterOperators after forced redeployments. This mirrors current
 # OpenShift guidance to run `oc adm wait-for-stable-cluster` after recovery.
+finish_restore_force_redeployment: true
 finish_restore_wait_for_stable_cluster: true
 finish_restore_stable_cluster_minimum_period: 1m
 finish_restore_stable_cluster_timeout: 30m
+
+# Some single-node/CRC restores can carry `localhost` back into etcd member
+# peer URLs or the openshift-etcd/etcd-endpoints ConfigMap. The etcd operator
+# expects routable node IPs there. Leave enabled: the task is idempotent and
+# derives member ID/name/IP from the restored cluster.
+finish_restore_repair_etcd_endpoint_addresses: true

@@ -147,9 +147,11 @@ Operational constants live in role defaults, not inventory:
 | `execute_restore` | `restore_host_path: /mnt/data` |
 | `execute_restore` / `finish_restore` | `restore_wait_retries: 90` |
 | `execute_restore` / `finish_restore` | `restore_wait_delay: 10` |
+| `finish_restore` | `finish_restore_force_redeployment: true` |
 | `finish_restore` | `finish_restore_wait_for_stable_cluster: true` |
 | `finish_restore` | `finish_restore_stable_cluster_minimum_period: 1m` |
 | `finish_restore` | `finish_restore_stable_cluster_timeout: 30m` |
+| `finish_restore` | `finish_restore_repair_etcd_endpoint_addresses: true` |
 
 OpenShift host paths and services used by the restore procedure are intentionally
 hardcoded to the standard locations: `/etc/kubernetes/manifests`,
@@ -217,6 +219,13 @@ after kubelet restart, it removes `/var/lib/kubelet/pki/*.pem`, restarts
 approves pending CSRs. This covers the normal kubelet client certificate recovery
 case. It also detects a stopped kubelet and tries to start/enable it before
 falling back to manual diagnostics.
+
+Single-node/CRC restores can restore etcd member peer URLs or the
+`openshift-etcd/etcd-endpoints` ConfigMap with `localhost`. The etcd operator
+rejects that value because it is not a routable node IP. The finish role now
+detects the restore node's InternalIP, reads the restored etcd member ID/name
+from the running etcd pod, updates the member peer URL when needed, patches the
+ConfigMap when needed, and restarts the etcd operator only after a repair.
 
 If `auto_approve_csrs=false` and pending CSRs exist, the playbook prints:
 

@@ -27,10 +27,12 @@
     restore_node_name: "{{ restore_node_label_query.stdout_lines[0] }}"
 
 - name: Verify labeled restore node is a control-plane node
-  ansible.builtin.command: >-
-    oc get node {{ restore_node_name }}
-    -l node-role.kubernetes.io/control-plane
-    -o name
+  ansible.builtin.shell: >-
+    set -o pipefail &&
+    oc get nodes -l node-role.kubernetes.io/control-plane -o name |
+    grep -Fx node/{{ restore_node_name }}
+  args:
+    executable: /bin/bash
   register: restore_node_control_plane_check
   changed_when: false
   failed_when: restore_node_control_plane_check.stdout_lines | length != 1

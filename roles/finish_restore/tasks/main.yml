@@ -11,6 +11,7 @@
       - 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}'
   register: restore_node_label_query
   changed_when: false
+  when: restore_node_name is not defined
 
 - name: Verify exactly one restore node is labeled
   ansible.builtin.assert:
@@ -21,16 +22,20 @@
       {{ restore_node_label_key }}={{ restore_node_label_value }}. Found
       {{ restore_node_label_query.stdout_lines | length }} labeled nodes:
       {{ restore_node_label_query.stdout_lines | default([]) | join(', ') }}.
+  when: restore_node_name is not defined
 
 - name: Set labeled restore node name
   ansible.builtin.set_fact:
     restore_node_name: "{{ restore_node_label_query.stdout_lines[0] }}"
+  when: restore_node_name is not defined
 
 - name: Verify labeled restore node is a control-plane node
-  ansible.builtin.command: >-
-    oc get node {{ restore_node_name }}
-    -l node-role.kubernetes.io/control-plane
-    -o name
+  ansible.builtin.shell: >-
+    set -o pipefail &&
+    oc get nodes -l node-role.kubernetes.io/control-plane -o name |
+    grep -Fx node/{{ restore_node_name }}
+  args:
+    executable: /bin/bash
   register: restore_node_control_plane_check
   changed_when: false
   failed_when: restore_node_control_plane_check.stdout_lines | length != 1
@@ -83,6 +88,145 @@
   retries: "{{ restore_wait_retries }}"
   delay: "{{ restore_wait_delay }}"
   until: etcd_pods_after_restore.rc == 0
+
+- name: Repair restored etcd endpoint addresses
+  when: finish_restore_repair_etcd_endpoint_addresses | bool
+  block:
+    - name: Discover restore node InternalIP
+      ansible.builtin.command:
+        argv:
+          - oc
+          - get
+          - node
+          - "{{ restore_node_name }}"
+          - -o
+          - 'jsonpath={.status.addresses[?(@.type=="InternalIP")].address}'
+      register: restore_node_internal_ip_query
+      changed_when: false
+
+    - name: Verify restore node InternalIP was discovered
+      ansible.builtin.assert:
+        that:
+          - restore_node_internal_ip_query.stdout | trim | length > 0
+        fail_msg: >-
+          Could not discover an InternalIP for restore node {{ restore_node_name }}.
+
+    - name: Read restore-node etcd member line
+      ansible.builtin.shell: |
+        set -euo pipefail
+        etcdctl_container=$(sudo crictl ps --name etcdctl -q | head -1)
+        test -n "${etcdctl_container}"
+        sudo crictl exec "${etcdctl_container}" etcdctl member list |
+          awk -F, -v node="{{ restore_node_name }}" '
+            {
+              id=$1
+              name=$3
+              peer=$4
+              client=$5
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", id)
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", name)
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", peer)
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", client)
+              if (name == node) {
+                print id " " peer " " client
+                found=1
+              }
+            }
+            END { exit found ? 0 : 1 }'
+      args:
+        executable: /bin/bash
+      register: restore_node_etcd_member_line
+      changed_when: false
+      delegate_to: "{{ restore_node_inventory_hostname }}"
+
+    - name: Set restore-node etcd endpoint facts
+      ansible.builtin.set_fact:
+        restore_node_internal_ip: "{{ restore_node_internal_ip_query.stdout | trim }}"
+        restore_node_etcd_member_id: "{{ restore_node_etcd_member_line.stdout.split()[0] }}"
+        restore_node_etcd_peer_url: "{{ restore_node_etcd_member_line.stdout.split()[1] }}"
+        restore_node_etcd_client_url: "{{ restore_node_etcd_member_line.stdout.split()[2] }}"
+        restore_node_expected_etcd_peer_url: "https://{{ restore_node_internal_ip_query.stdout | trim }}:2380"
+        restore_node_expected_etcd_endpoint_host: "{{ restore_node_internal_ip_query.stdout | trim }}"
+
+    - name: Update restored etcd member peer URL when non-routable
+      ansible.builtin.shell: |
+        set -euo pipefail
+        etcdctl_container=$(sudo crictl ps --name etcdctl -q | head -1)
+        test -n "${etcdctl_container}"
+        sudo crictl exec "${etcdctl_container}" env -u ETCDCTL_ENDPOINTS \
+          etcdctl --endpoints="{{ restore_node_etcd_client_url }}" \
+          member update "{{ restore_node_etcd_member_id }}" \
+          --peer-urls="{{ restore_node_expected_etcd_peer_url }}"
+      args:
+        executable: /bin/bash
+      register: restore_node_etcd_member_update
+      changed_when: true
+      when: restore_node_etcd_peer_url != restore_node_expected_etcd_peer_url
+      delegate_to: "{{ restore_node_inventory_hostname }}"
+
+    - name: Read etcd endpoints ConfigMap value for restore member
+      ansible.builtin.command:
+        argv:
+          - oc
+          - -n
+          - "{{ etcd_namespace }}"
+          - get
+          - configmap
+          - etcd-endpoints
+          - -o
+          - "jsonpath={.data.{{ restore_node_etcd_member_id }}}"
+      register: restore_node_etcd_endpoint_configmap_value
+      changed_when: false
+
+    - name: Patch etcd endpoints ConfigMap when it does not match node IP
+      ansible.builtin.command:
+        argv:
+          - oc
+          - -n
+          - "{{ etcd_namespace }}"
+          - patch
+          - configmap
+          - etcd-endpoints
+          - --type
+          - merge
+          - -p
+          - >-
+            {{ {'data': {restore_node_etcd_member_id: restore_node_expected_etcd_endpoint_host}} | to_json }}
+      register: restore_node_etcd_endpoint_patch
+      changed_when: true
+      when: >-
+        restore_node_etcd_endpoint_configmap_value.stdout | trim !=
+        restore_node_expected_etcd_endpoint_host
+
+    - name: Restart etcd operator after endpoint address repair
+      ansible.builtin.command:
+        argv:
+          - oc
+          - -n
+          - openshift-etcd-operator
+          - delete
+          - pod
+          - -l
+          - app=etcd-operator
+      changed_when: true
+      when: >-
+        restore_node_etcd_member_update is changed or
+        restore_node_etcd_endpoint_patch is changed
+
+    - name: Wait for etcd operator pod after endpoint address repair
+      ansible.builtin.shell: >-
+        set -o pipefail &&
+        oc -n openshift-etcd-operator get pods -l app=etcd-operator
+        --no-headers | awk '
+          { split($2, ready, "/"); if (ready[1] != ready[2] || $3 != "Running") bad=1 }
+          END { exit bad }'
+      args:
+        executable: /bin/bash
+      register: etcd_operator_after_endpoint_repair
+      changed_when: false
+      retries: "{{ restore_wait_retries }}"
+      delay: "{{ restore_wait_delay }}"
+      until: etcd_operator_after_endpoint_repair.rc == 0
 
 - name: Wait for control-plane nodes to become Ready
   block:
@@ -139,6 +283,7 @@
     -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }}
     --type=merge
   changed_when: true
+  when: finish_restore_force_redeployment | bool
 
 - name: Force kube-apiserver redeployment
   ansible.builtin.command: >-
@@ -146,6 +291,7 @@
     -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }}
     --type=merge
   changed_when: true
+  when: finish_restore_force_redeployment | bool
 
 - name: Force kube-controller-manager redeployment
   ansible.builtin.command: >-
@@ -153,6 +299,7 @@
     -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }}
     --type=merge
   changed_when: true
+  when: finish_restore_force_redeployment | bool
 
 - name: Force kube-scheduler redeployment
   ansible.builtin.command: >-
@@ -160,21 +307,25 @@
     -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }}
     --type=merge
   changed_when: true
+  when: finish_restore_force_redeployment | bool
 
 - name: Wait for stable OpenShift cluster operators
   when: finish_restore_wait_for_stable_cluster | bool
   block:
-    - name: Wait for cluster operators to stabilise
-      ansible.builtin.command:
-        argv:
-          - oc
-          - adm
-          - wait-for-stable-cluster
-          - --minimum-stable-period
-          - "{{ finish_restore_stable_cluster_minimum_period }}"
-          - --timeout
-          - "{{ finish_restore_stable_cluster_timeout }}"
+    - name: Wait for control-plane operators to stabilise
+      ansible.builtin.shell: >-
+        set -o pipefail &&
+        oc get co etcd kube-apiserver kube-controller-manager kube-scheduler
+        --no-headers |
+        awk '$3 != "True" || $4 != "False" || $5 != "False" { bad=1 }
+        END { exit bad }'
+      args:
+        executable: /bin/bash
+      register: stable_cluster_check
       changed_when: false
+      retries: "{{ restore_wait_retries }}"
+      delay: "{{ restore_wait_delay }}"
+      until: stable_cluster_check.rc == 0
   rescue:
     - name: Gather per-component status on timeout
       ansible.builtin.shell: >-
