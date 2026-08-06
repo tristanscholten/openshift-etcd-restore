@@ -1,60 +1,15 @@
 ---
-- name: Discover OpenShift nodes labeled for etcd restore
-  ansible.builtin.command:
-    argv:
-      - oc
-      - get
-      - nodes
-      - -l
-      - "{{ restore_node_label_key }}={{ restore_node_label_value }}"
-      - -o
-      - 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}'
-  register: validate_restore_node_label_query
-  changed_when: false
-  when: restore_node_name is not defined
-
-- name: Verify exactly one restore node is labeled
-  ansible.builtin.assert:
-    that:
-      - validate_restore_node_label_query.stdout_lines | length == 1
-    fail_msg: >-
-      Exactly one control-plane node must have the label
-      {{ restore_node_label_key }}={{ restore_node_label_value }}. Found
-      {{ validate_restore_node_label_query.stdout_lines | length }} labeled nodes:
-      {{ validate_restore_node_label_query.stdout_lines | default([]) | join(', ') }}.
-  when: restore_node_name is not defined
-
-- name: Set restore node name for validation
+- name: Set restore-node inventory host from prior restore discovery
   ansible.builtin.set_fact:
-    validate_restore_node_name: >-
-      {{ restore_node_name | default(validate_restore_node_label_query.stdout_lines[0]) }}
+    validate_restore_node_inventory_hostname: "{{ restore_node_inventory_hostname }}"
+  when: restore_node_inventory_hostname is defined
 
-- name: Verify restore node is a control-plane node
-  ansible.builtin.shell: >-
-    set -o pipefail &&
-    oc get nodes -l node-role.kubernetes.io/control-plane -o name |
-    grep -Fx node/{{ validate_restore_node_name }}
-  args:
-    executable: /bin/bash
-  register: validate_restore_control_plane_check
-  changed_when: false
-
-- name: Initialize restore-node inventory mapping for validation
+- name: Set restore-node inventory host for single-node inventory
   ansible.builtin.set_fact:
-    validate_restore_node_inventory_hosts: []
-
-- name: Match restore node to inventory host for validation
-  ansible.builtin.set_fact:
-    validate_restore_node_inventory_hosts: "{{ validate_restore_node_inventory_hosts + [item] }}"
-  loop: "{{ groups['control_plane'] | default([]) }}"
-  when: >-
-    (hostvars[item].openshift_node_name | default(item)) ==
-    validate_restore_node_name
-
-- name: Set restore-node inventory host for validation
-  ansible.builtin.set_fact:
-    validate_restore_node_inventory_hostname: "{{ validate_restore_node_inventory_hosts[0] }}"
-  when: validate_restore_node_inventory_hosts | length == 1
+    validate_restore_node_inventory_hostname: "{{ groups['control_plane'][0] }}"
+  when:
+    - validate_restore_node_inventory_hostname is not defined
+    - groups['control_plane'] | default([]) | length == 1
 
 - name: Verify no pending CSRs remain
   ansible.builtin.shell: >-
@@ -168,7 +123,6 @@
   ansible.builtin.debug:
     msg:
       - "Restore validation passed."
-      - "Restore node: {{ validate_restore_node_name }}"
       - "Control-plane nodes are Ready."
       - "Pending CSRs: none."
       - "ClusterOperators healthy: {{ validate_restore_clusteroperators | join(', ') }}."

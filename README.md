@@ -158,14 +158,13 @@ with `-e` only when your restore shape differs from the default Kasten flow.
 | `restore_use_etcdctl_restore` | `false` | Set `true` for single-node OpenShift, CRC, or SNO restores so `cluster-restore.sh` runs the documented `ETCD_ETCDCTL_RESTORE=1` path. Leave `false` for standard multi-node restore-pod flow. |
 | `restore_wait_retries` | `90` | Increase for slow or resource-constrained clusters. With default delay this is 15 minutes. |
 | `restore_wait_delay` | `10` | Increase/decrease polling interval in seconds. |
-| `finish_restore_force_redeployment` | `true` | Keep `true` for a real restore so control-plane components redeploy. Set `false` only for idempotent finish-role validation on an already-restored cluster. |
 | `finish_restore_wait_for_stable_cluster` | `true` | Keep `true` unless your `oc`/cluster cannot support stable-cluster waiting and you intentionally use external validation. |
 | `finish_restore_stable_cluster_minimum_period` | `1m` | Change if you need a longer continuous healthy period before declaring success. |
 | `finish_restore_stable_cluster_timeout` | `30m` | Increase for very slow recovery. |
 | `finish_restore_repair_etcd_endpoint_addresses` | `true` | Keep enabled, especially for CRC/SNO. It repairs restored `localhost` etcd peer URLs and `openshift-etcd/etcd-endpoints` values to the restore node InternalIP. |
 | `validate_restore_clusteroperators` | `etcd`, `kube-apiserver`, `kube-controller-manager`, `kube-scheduler` | Change if you need to validate a different operator set after restore. |
 | `validate_restore_check_etcd_endpoint_addresses` | `true` | Keep enabled for CRC/SNO and normal restores. It verifies the restored `etcd-endpoints` ConfigMap does not contain loopback/localhost addresses. |
-| `validate_restore_check_etcd_member_urls` | `true` | Keep enabled when the restore node is present in inventory and reachable over SSH. It verifies live etcd member peer URLs do not point at localhost/loopback. |
+| `validate_restore_check_etcd_member_urls` | `true` | Keep enabled when a restore-node inventory host is available from prior restore facts or a single-node inventory. It verifies live etcd member peer URLs do not point at localhost/loopback. |
 
 CRC/SNO local backup example:
 
@@ -209,7 +208,6 @@ Operational constants live in role defaults, not inventory:
 | `execute_restore` | `restore_host_path: /mnt/data` |
 | `execute_restore` / `finish_restore` | `restore_wait_retries: 90` |
 | `execute_restore` / `finish_restore` | `restore_wait_delay: 10` |
-| `finish_restore` | `finish_restore_force_redeployment: true` |
 | `finish_restore` | `finish_restore_wait_for_stable_cluster: true` |
 | `finish_restore` | `finish_restore_stable_cluster_minimum_period: 1m` |
 | `finish_restore` | `finish_restore_stable_cluster_timeout: 30m` |
@@ -350,7 +348,7 @@ Approve valid CSRs manually, then re-run the playbook.
    - verifies etcd, kube-apiserver, kube-controller-manager, and kube-scheduler ClusterOperators are healthy
    - verifies etcd pods are present, Ready, and Running
    - verifies `openshift-etcd/etcd-endpoints` does not contain localhost/loopback values
-   - verifies live etcd member peer URLs are routable when the restore node is reachable from inventory
+   - verifies live etcd member peer URLs are routable when a restore-node inventory host is available
 
 If nodes remain `NotReady` after automatic kubelet start, kubelet certificate
 recovery, and CSR handling, diagnose manually before continuing:

@@ -283,7 +283,6 @@
     -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }}
     --type=merge
   changed_when: true
-  when: finish_restore_force_redeployment | bool
 
 - name: Force kube-apiserver redeployment
   ansible.builtin.command: >-
@@ -291,7 +290,6 @@
     -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }}
     --type=merge
   changed_when: true
-  when: finish_restore_force_redeployment | bool
 
 - name: Force kube-controller-manager redeployment
   ansible.builtin.command: >-
@@ -299,7 +297,6 @@
     -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }}
     --type=merge
   changed_when: true
-  when: finish_restore_force_redeployment | bool
 
 - name: Force kube-scheduler redeployment
   ansible.builtin.command: >-
@@ -307,7 +304,6 @@
     -p={{ {'spec': {'forceRedeploymentReason': 'recovery-' ~ lookup('pipe', 'date --rfc-3339=ns')}} | to_json | quote }}
     --type=merge
   changed_when: true
-  when: finish_restore_force_redeployment | bool
 
 - name: Wait for stable OpenShift cluster operators
   when: finish_restore_wait_for_stable_cluster | bool
