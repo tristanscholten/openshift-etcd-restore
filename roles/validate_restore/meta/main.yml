@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: validate_restore
+  namespace: openshift_etcd_restore
+  author: Tristan Scholten
+  description: Validate OpenShift control-plane health after etcd restore.
+  license: MIT
+  min_ansible_version: "2.15"
+
+dependencies: []

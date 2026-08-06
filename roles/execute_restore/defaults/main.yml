@@ -11,6 +11,11 @@ restore_script_path: /usr/local/bin/cluster-restore.sh
 # Fixed OpenShift/Kasten restore staging path.
 restore_host_path: /mnt/data
 
+# Set true for single-node OpenShift/CRC/SNO restores where the upstream
+# cluster-restore.sh should use etcdctl snapshot restore directly instead of
+# creating a restore static pod.
+restore_use_etcdctl_restore: false
+
 # OpenShift static pods and etcd pods can take several minutes to settle during
 # disaster recovery. 90 retries with a 10 second delay gives a 15 minute wait.
 restore_wait_retries: 90

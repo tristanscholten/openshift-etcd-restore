@@ -32,19 +32,26 @@ replacement.
 
 ## Shape
 
-One playbook:
+Main restore playbook:
 
 ```text
 playbooks/restore.yml
 ```
 
-Four roles:
+Standalone validation playbook:
+
+```text
+playbooks/validate-restore.yml
+```
+
+Five roles:
 
 ```text
 roles/check_prerequisites   # prepare/check Kasten restore target and backup file
 roles/execute_restore       # destructive host restore up to CSR approval
 roles/approve_csrs          # auto-approve CSRs or print manual commands and stop
 roles/finish_restore        # force remaining control-plane redeployments and print final checks
+roles/validate_restore      # validate post-restore cluster health without mutations
 ```
 
 The restore node is selected from the OpenShift node label
@@ -120,16 +127,70 @@ auto_approve_csrs: false
 kasten_namespace: kasten-io
 etcd_namespace: openshift-etcd
 etcd_restore_namespace: etcd-restore
+restore_require_kasten_download_prerequisites: true
 restore_snapshot_file: etcd-backup.db
 restore_pv_name: pv-etcd
 restore_pvc_name: pvc-etcd
+restore_use_etcdctl_restore: false
 ```
 
-The restore namespace, PV, and PVC are prerequisites. The playbook verifies that
-they exist and that the PVC is already `Bound`; it does not create or mutate
-them. The Kasten documentation names these resources `pv-etcd` and `pvc-etcd`.
-If your manifests use different names, update `restore_pv_name` and
-`restore_pvc_name`.
+## Variables and defaults
+
+Inventory variables live in `inventories/<name>/group_vars/all.yml`. Role
+defaults live under `roles/*/defaults/main.yml`; override them in inventory or
+with `-e` only when your restore shape differs from the default Kasten flow.
+
+| Variable | Default | Change when |
+|---|---:|---|
+| `i_understand_this_is_destructive` | `false` | Set `true` only for the actual destructive restore run. Leave `false` for syntax checks, inventory validation, and reviews. |
+| `auto_approve_csrs` | `false` | Set `true` in controlled lab/test clusters when you want the playbook to approve pending CSRs automatically after restore. Leave `false` in production unless an operator validates each CSR manually. |
+| `kasten_namespace` | `kasten-io` | Change only if Kasten is installed in a different namespace. Used when Kasten prerequisite checks are enabled. |
+| `etcd_namespace` | `openshift-etcd` | Normally do not change. Change only for non-standard OpenShift layouts. |
+| `etcd_restore_namespace` | `etcd-restore` | Change if your Kasten Kanister restore namespace uses another name. Used when Kasten prerequisite checks are enabled. |
+| `restore_require_kasten_download_prerequisites` | `true` | Keep `true` for the normal Kasten/Kanister workflow so the playbook verifies Kasten namespace, restore namespace, PV, and PVC. Set `false` when the backup is already staged on `restore_host_path` outside of Kasten, for example a CRC/SNO lab where you copied the backup to `/mnt/data` yourself. |
+| `restore_snapshot_file` | `etcd-backup.db` | Set to the exact snapshot filename present under `restore_host_path` on the selected restore node, for example `snapshot_2026-08-05_084046.db`. |
+| `restore_pv_name` | `pv-etcd` | Change if your Kasten restore PV has another name. Used when Kasten prerequisite checks are enabled. |
+| `restore_pvc_name` | `pvc-etcd` | Change if your Kasten restore PVC has another name. Used when Kasten prerequisite checks are enabled. |
+| `restore_node_label_key` | `etcd-restore` | Rarely change. Must match the label key on exactly one control-plane OpenShift node. |
+| `restore_node_label_value` | `"true"` | Rarely change. Must match the label value on exactly one control-plane OpenShift node. |
+| `restore_host_path` | `/mnt/data` | Change only when your Kasten PV or pre-staged backup uses another host path on the restore node. |
+| `restore_script_path` | `/usr/local/bin/cluster-restore.sh` | Rarely change. Remote path where the bundled restore script is copied and run. |
+| `restore_use_etcdctl_restore` | `false` | Set `true` for single-node OpenShift, CRC, or SNO restores so `cluster-restore.sh` runs the documented `ETCD_ETCDCTL_RESTORE=1` path. Leave `false` for standard multi-node restore-pod flow. |
+| `restore_wait_retries` | `90` | Increase for slow or resource-constrained clusters. With default delay this is 15 minutes. |
+| `restore_wait_delay` | `10` | Increase/decrease polling interval in seconds. |
+| `finish_restore_wait_for_stable_cluster` | `true` | Keep `true` unless your `oc`/cluster cannot support stable-cluster waiting and you intentionally use external validation. |
+| `finish_restore_stable_cluster_minimum_period` | `1m` | Change if you need a longer continuous healthy period before declaring success. |
+| `finish_restore_stable_cluster_timeout` | `30m` | Increase for very slow recovery. |
+| `finish_restore_repair_etcd_endpoint_addresses` | `true` | Keep enabled, especially for CRC/SNO. It repairs restored `localhost` etcd peer URLs and `openshift-etcd/etcd-endpoints` values to the restore node InternalIP. |
+| `validate_restore_clusteroperators` | `etcd`, `kube-apiserver`, `kube-controller-manager`, `kube-scheduler` | Change if you need to validate a different operator set after restore. |
+| `validate_restore_check_etcd_endpoint_addresses` | `true` | Keep enabled for CRC/SNO and normal restores. It verifies the restored `etcd-endpoints` ConfigMap does not contain loopback/localhost addresses. |
+| `validate_restore_check_etcd_member_urls` | `true` | Keep enabled when a restore-node inventory host is available from prior restore facts or a single-node inventory. It verifies live etcd member peer URLs do not point at localhost/loopback. |
+
+CRC/SNO local backup example:
+
+```yaml
+i_understand_this_is_destructive: true
+auto_approve_csrs: true
+restore_require_kasten_download_prerequisites: false
+restore_host_path: /mnt/data
+restore_snapshot_file: snapshot_2026-08-05_084046.db
+restore_use_etcdctl_restore: true
+```
+
+This shape assumes you already copied the snapshot and
+`static_kuberesources_*.tar.gz` to `/mnt/data` on the restore node. The playbook
+still verifies the snapshot exists before destructive restore tasks run.
+
+The restore namespace, PV, and PVC are prerequisites for the Kasten workflow.
+The playbook verifies that they exist and that the PVC is already `Bound`; it
+does not create or mutate them. The Kasten documentation names these resources
+`pv-etcd` and `pvc-etcd`. If your manifests use different names, update
+`restore_pv_name` and `restore_pvc_name`.
+
+If `restore_require_kasten_download_prerequisites=false`, the playbook skips the
+Kasten namespace/PV/PVC checks and verifies only the pre-staged snapshot under
+`restore_host_path`. Use this for CRC/SNO/local lab restores, not for the normal
+Kasten workflow.
 
 Use an empty `storageClassName: ""` on static PV/PVC manifests unless you
 intentionally provision dynamic storage. If omitted, OpenShift/Kubernetes can
@@ -150,6 +211,9 @@ Operational constants live in role defaults, not inventory:
 | `finish_restore` | `finish_restore_wait_for_stable_cluster: true` |
 | `finish_restore` | `finish_restore_stable_cluster_minimum_period: 1m` |
 | `finish_restore` | `finish_restore_stable_cluster_timeout: 30m` |
+| `finish_restore` | `finish_restore_repair_etcd_endpoint_addresses: true` |
+| `validate_restore` | `validate_restore_check_etcd_endpoint_addresses: true` |
+| `validate_restore` | `validate_restore_check_etcd_member_urls: true` |
 
 OpenShift host paths and services used by the restore procedure are intentionally
 hardcoded to the standard locations: `/etc/kubernetes/manifests`,
@@ -210,6 +274,12 @@ ansible-playbook \
   -e auto_approve_csrs=true
 ```
 
+Run validation only, without forcing redeployments or changing the cluster:
+
+```bash
+ansible-playbook -i inventories/prod/hosts.yml playbooks/validate-restore.yml
+```
+
 With `auto_approve_csrs=true`, the playbook also attempts the common post-restore
 kubelet recovery path automatically: if a control-plane node remains `NotReady`
 after kubelet restart, it removes `/var/lib/kubelet/pki/*.pem`, restarts
@@ -217,6 +287,13 @@ after kubelet restart, it removes `/var/lib/kubelet/pki/*.pem`, restarts
 approves pending CSRs. This covers the normal kubelet client certificate recovery
 case. It also detects a stopped kubelet and tries to start/enable it before
 falling back to manual diagnostics.
+
+Single-node/CRC restores can restore etcd member peer URLs or the
+`openshift-etcd/etcd-endpoints` ConfigMap with `localhost`. The etcd operator
+rejects that value because it is not a routable node IP. The finish role now
+detects the restore node's InternalIP, reads the restored etcd member ID/name
+from the running etcd pod, updates the member peer URL when needed, patches the
+ConfigMap when needed, and restarts the etcd operator only after a repair.
 
 If `auto_approve_csrs=false` and pending CSRs exist, the playbook prints:
 
@@ -232,12 +309,12 @@ Approve valid CSRs manually, then re-run the playbook.
 
 1. `check_prerequisites`
    - verifies local tools and OpenShift admin access
-   - verifies Kasten and etcd namespaces
+   - verifies the OpenShift etcd namespace
+   - verifies Kasten namespace and restore PV/PVC when `restore_require_kasten_download_prerequisites=true`
    - verifies etcd pods are discoverable
    - verifies SSH/sudo/crictl/static pod access on all control-plane hosts
-   - verifies the restore namespace, PV, and bound PVC exist
    - verifies exactly one control-plane node has the restore-node label
-   - verifies the Kasten restore has downloaded the etcd backup to the restore node
+   - verifies the snapshot file exists under `restore_host_path` on the restore node
 
 2. `execute_restore`
    - requires `i_understand_this_is_destructive=true`
@@ -262,6 +339,16 @@ Approve valid CSRs manually, then re-run the playbook.
    - forces redeployment of etcd, kube-apiserver, kube-controller-manager, and kube-scheduler
    - waits for ClusterOperators with `oc adm wait-for-stable-cluster`
    - prints final verification commands
+
+5. `validate_restore`
+   - runs automatically at the end of `playbooks/restore.yml`
+   - can also be run independently with `playbooks/validate-restore.yml`
+   - verifies no pending CSRs remain
+   - verifies control-plane nodes are `Ready`
+   - verifies etcd, kube-apiserver, kube-controller-manager, and kube-scheduler ClusterOperators are healthy
+   - verifies etcd pods are present, Ready, and Running
+   - verifies `openshift-etcd/etcd-endpoints` does not contain localhost/loopback values
+   - verifies live etcd member peer URLs are routable when a restore-node inventory host is available
 
 If nodes remain `NotReady` after automatic kubelet start, kubelet certificate
 recovery, and CSR handling, diagnose manually before continuing:

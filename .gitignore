@@ -3,5 +3,6 @@
 __pycache__/
 .pytest_cache/
 .venv/
+.local/
 inventories/prod/
 files/cluster-ocp-restore.sh
