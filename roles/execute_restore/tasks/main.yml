@@ -43,8 +43,9 @@
       - 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}'
   register: restore_node_label_query
   changed_when: false
-  become: true
   delegate_to: localhost
+  run_once: true
+  when: hostvars['localhost'].restore_node_name is not defined
 
 - name: Verify exactly one restore node is labeled
   ansible.builtin.assert:
@@ -55,63 +56,53 @@
       {{ restore_node_label_key }}={{ restore_node_label_value }}. Found
       {{ restore_node_label_query.stdout_lines | length }} labeled nodes:
       {{ restore_node_label_query.stdout_lines | default([]) | join(', ') }}.
-
-- name: Set labeled restore node name
-  ansible.builtin.set_fact:
-    restore_node_name: "{{ restore_node_label_query.stdout_lines[0] }}"
-
-- name: Verify labeled restore node is a control-plane node
-  ansible.builtin.shell: >-
-    set -o pipefail &&
-    oc get nodes -l node-role.kubernetes.io/control-plane -o name |
-    grep -Fx node/{{ restore_node_name }}
-  args:
-    executable: /bin/bash
-  register: restore_node_control_plane_check
-  changed_when: false
-  failed_when: restore_node_control_plane_check.stdout_lines | length != 1
-  become: true
-  delegate_to: localhost
-
-- name: Initialize restore-node host list
-  ansible.builtin.set_fact:
-    restore_node_inventory_hosts: []
-
-- name: Match labeled restore node to inventory host
-  ansible.builtin.set_fact:
-    restore_node_inventory_hosts: "{{ restore_node_inventory_hosts + [item] }}"
-  loop: "{{ groups['control_plane'] | default([]) }}"
-  when: (hostvars[item].openshift_node_name | default(item)) == restore_node_name
-
-- name: Verify labeled restore node exists once in inventory
-  ansible.builtin.assert:
-    that:
-      - restore_node_inventory_hosts | length == 1
-    fail_msg: >-
-      The node labeled {{ restore_node_label_key }}={{ restore_node_label_value }}
-      is {{ restore_node_name }}, but it does not map to exactly one host in the
-      control_plane inventory group. Set openshift_node_name on the matching
-      inventory host when the SSH inventory name differs from the OpenShift node
-      name.
   run_once: true
+  when: hostvars['localhost'].restore_node_name is not defined
 
-- name: Set restore-node facts
+- name: Set restore-node facts from prior discovery
   ansible.builtin.set_fact:
-    restore_node_inventory_hostname: "{{ restore_node_inventory_hosts[0] }}"
-    restore_node_is_current_host: "{{ inventory_hostname == restore_node_inventory_hosts[0] }}"
+    restore_node_name: >-
+      {{ hostvars['localhost'].restore_node_name |
+         default(restore_node_label_query.stdout_lines[0]) }}
+    restore_node_inventory_hostname: >-
+      {{ hostvars['localhost'].restore_node_inventory_hostname |
+         default(omit) }}
+
+- name: Derive restore-node inventory hostname when not cached
+  when: restore_node_inventory_hostname is not defined
+  block:
+    - name: Initialize restore-node host list
+      ansible.builtin.set_fact:
+        restore_node_inventory_hosts: []
+
+    - name: Match labeled restore node to inventory host
+      ansible.builtin.set_fact:
+        restore_node_inventory_hosts: "{{ restore_node_inventory_hosts + [item] }}"
+      loop: "{{ groups['control_plane'] | default([]) }}"
+      when: (hostvars[item].openshift_node_name | default(item)) == restore_node_name
+
+    - name: Verify labeled restore node exists once in inventory
+      ansible.builtin.assert:
+        that:
+          - restore_node_inventory_hosts | length == 1
+        fail_msg: >-
+          The node labeled {{ restore_node_label_key }}={{ restore_node_label_value }}
+          is {{ restore_node_name }}, but it does not map to exactly one host in the
+          control_plane inventory group. Set openshift_node_name on the matching
+          inventory host when the SSH inventory name differs from the OpenShift node
+          name.
+
+    - name: Set restore-node inventory hostname
+      ansible.builtin.set_fact:
+        restore_node_inventory_hostname: "{{ restore_node_inventory_hosts[0] }}"
+
+- name: Set current-host flag
+  ansible.builtin.set_fact:
+    restore_node_is_current_host: "{{ inventory_hostname == restore_node_inventory_hostname }}"
 
 - name: Capture restore timestamp
   ansible.builtin.set_fact:
     restore_timestamp: "{{ lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ') }}"
-
-- name: Verify snapshot exists on restore node
-  ansible.builtin.stat:
-    path: "{{ restore_host_path }}/{{ restore_snapshot_file }}"
-  register: restore_snapshot_stat
-  failed_when: >-
-    not restore_snapshot_stat.stat.exists or
-    restore_snapshot_stat.stat.size | int == 0
-  when: restore_node_is_current_host | bool
 
 - name: Copy restore script to restore node over SSH
   ansible.builtin.copy:
@@ -175,11 +166,34 @@
     creates: "/tmp/etcd.{{ restore_timestamp }}"
   when: not restore_node_is_current_host | bool
 
-- name: Run modified cluster restore script on restore node
-  ansible.builtin.command: "{{ restore_script_path }} {{ restore_host_path }}"
-  environment: >-
-    {{ {'ETCD_ETCDCTL_RESTORE': '1'} if restore_use_etcdctl_restore | bool else {} }}
+- name: Run cluster restore script on restore node
   when: restore_node_is_current_host | bool
+  block:
+    - name: Execute cluster-restore.sh
+      ansible.builtin.command: "{{ restore_script_path }} {{ restore_host_path }}"
+      environment: >-
+        {{ {'ETCD_ETCDCTL_RESTORE': '1'} if restore_use_etcdctl_restore | bool else {} }}
+  rescue:
+    - name: Capture restore script output for diagnostics
+      ansible.builtin.debug:
+        msg:
+          - "RESTORE SCRIPT FAILED on {{ inventory_hostname }}."
+          - "Script: {{ restore_script_path }} {{ restore_host_path }}"
+          - "Exit code: {{ ansible_failed_result.rc | default('unknown') }}"
+          - "Stdout: {{ ansible_failed_result.stdout_lines | default([]) }}"
+          - "Stderr: {{ ansible_failed_result.stderr_lines | default([]) }}"
+          - "Check on the restore node:"
+          - "  sudo crictl ps -a | grep etcd"
+          - "  sudo journalctl -u kubelet.service -b --no-pager | tail -100"
+          - "  ls -la {{ restore_host_path }}/"
+
+    - name: Abort after restore script failure
+      ansible.builtin.fail:
+        msg: >-
+          cluster-restore.sh failed on {{ inventory_hostname }} with exit code
+          {{ ansible_failed_result.rc | default('unknown') }}. The etcd restore
+          did not complete. Investigate the error above, fix the issue, and
+          re-run playbooks/restore.yml.
 
 - name: Restart kubelet on all control-plane nodes
   ansible.builtin.systemd:
