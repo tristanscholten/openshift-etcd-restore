@@ -1,0 +1,24 @@
+---
+# Restore validation waits. Defaults match the restore roles: 15 minutes total.
+restore_wait_retries: 90
+restore_wait_delay: 10
+
+# OpenShift namespaces and restore-node label used for validation.
+etcd_namespace: openshift-etcd
+restore_node_label_key: etcd-restore
+restore_node_label_value: "true"
+
+# Control-plane ClusterOperators expected to be healthy after restore.
+validate_restore_clusteroperators:
+  - etcd
+  - kube-apiserver
+  - kube-controller-manager
+  - kube-scheduler
+
+# Validate the restored etcd-endpoints ConfigMap does not contain localhost or
+# loopback values. Important for CRC/SNO restore regressions.
+validate_restore_check_etcd_endpoint_addresses: true
+
+# Validate live etcd member peer URLs from the restore node when the restore node
+# can be mapped to an inventory host.
+validate_restore_check_etcd_member_urls: true

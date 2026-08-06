@@ -39,3 +39,12 @@
       tags:
         - finish_restore
         - finish
+
+- name: Validate OpenShift etcd restore
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - role: validate_restore
+      tags:
+        - validate_restore
+        - validate

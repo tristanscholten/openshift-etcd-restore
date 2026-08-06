@@ -32,19 +32,26 @@ replacement.
 
 ## Shape
 
-One playbook:
+Main restore playbook:
 
 ```text
 playbooks/restore.yml
 ```
 
-Four roles:
+Standalone validation playbook:
+
+```text
+playbooks/validate-restore.yml
+```
+
+Five roles:
 
 ```text
 roles/check_prerequisites   # prepare/check Kasten restore target and backup file
 roles/execute_restore       # destructive host restore up to CSR approval
 roles/approve_csrs          # auto-approve CSRs or print manual commands and stop
 roles/finish_restore        # force remaining control-plane redeployments and print final checks
+roles/validate_restore      # validate post-restore cluster health without mutations
 ```
 
 The restore node is selected from the OpenShift node label
@@ -156,6 +163,9 @@ with `-e` only when your restore shape differs from the default Kasten flow.
 | `finish_restore_stable_cluster_minimum_period` | `1m` | Change if you need a longer continuous healthy period before declaring success. |
 | `finish_restore_stable_cluster_timeout` | `30m` | Increase for very slow recovery. |
 | `finish_restore_repair_etcd_endpoint_addresses` | `true` | Keep enabled, especially for CRC/SNO. It repairs restored `localhost` etcd peer URLs and `openshift-etcd/etcd-endpoints` values to the restore node InternalIP. |
+| `validate_restore_clusteroperators` | `etcd`, `kube-apiserver`, `kube-controller-manager`, `kube-scheduler` | Change if you need to validate a different operator set after restore. |
+| `validate_restore_check_etcd_endpoint_addresses` | `true` | Keep enabled for CRC/SNO and normal restores. It verifies the restored `etcd-endpoints` ConfigMap does not contain loopback/localhost addresses. |
+| `validate_restore_check_etcd_member_urls` | `true` | Keep enabled when the restore node is present in inventory and reachable over SSH. It verifies live etcd member peer URLs do not point at localhost/loopback. |
 
 CRC/SNO local backup example:
 
@@ -204,6 +214,8 @@ Operational constants live in role defaults, not inventory:
 | `finish_restore` | `finish_restore_stable_cluster_minimum_period: 1m` |
 | `finish_restore` | `finish_restore_stable_cluster_timeout: 30m` |
 | `finish_restore` | `finish_restore_repair_etcd_endpoint_addresses: true` |
+| `validate_restore` | `validate_restore_check_etcd_endpoint_addresses: true` |
+| `validate_restore` | `validate_restore_check_etcd_member_urls: true` |
 
 OpenShift host paths and services used by the restore procedure are intentionally
 hardcoded to the standard locations: `/etc/kubernetes/manifests`,
@@ -262,6 +274,12 @@ ansible-playbook \
   playbooks/restore.yml \
   -e i_understand_this_is_destructive=true \
   -e auto_approve_csrs=true
+```
+
+Run validation only, without forcing redeployments or changing the cluster:
+
+```bash
+ansible-playbook -i inventories/prod/hosts.yml playbooks/validate-restore.yml
 ```
 
 With `auto_approve_csrs=true`, the playbook also attempts the common post-restore
@@ -323,6 +341,16 @@ Approve valid CSRs manually, then re-run the playbook.
    - forces redeployment of etcd, kube-apiserver, kube-controller-manager, and kube-scheduler
    - waits for ClusterOperators with `oc adm wait-for-stable-cluster`
    - prints final verification commands
+
+5. `validate_restore`
+   - runs automatically at the end of `playbooks/restore.yml`
+   - can also be run independently with `playbooks/validate-restore.yml`
+   - verifies no pending CSRs remain
+   - verifies control-plane nodes are `Ready`
+   - verifies etcd, kube-apiserver, kube-controller-manager, and kube-scheduler ClusterOperators are healthy
+   - verifies etcd pods are present, Ready, and Running
+   - verifies `openshift-etcd/etcd-endpoints` does not contain localhost/loopback values
+   - verifies live etcd member peer URLs are routable when the restore node is reachable from inventory
 
 If nodes remain `NotReady` after automatic kubelet start, kubelet certificate
 recovery, and CSR handling, diagnose manually before continuing:
