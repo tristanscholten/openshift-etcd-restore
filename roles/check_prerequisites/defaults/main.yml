@@ -6,3 +6,7 @@ restore_node_label_value: "true"
 
 # Fixed OpenShift/Kasten restore staging path.
 restore_host_path: /mnt/data
+
+# Set false when the backup is already staged on restore_host_path outside of
+# Kasten/Kanister, for example a local lab copy to /mnt/data on CRC/SNO.
+restore_require_kasten_download_prerequisites: true

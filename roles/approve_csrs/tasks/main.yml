@@ -1,47 +1,54 @@
 ---
-- name: List CSRs
-  ansible.builtin.command: oc get csr --no-headers
-  register: csr_list
-  changed_when: false
-  failed_when: false
+# Poll for pending CSRs over a 180s window to catch late-arriving requests.
+- name: Approve pending CSRs with retry loop
+  when: auto_approve_csrs | bool
+  block:
+    - name: Poll and approve pending CSRs until none arrive
+      ansible.builtin.shell: |
+        set -o pipefail
+        pending=$(oc get csr --no-headers 2>/dev/null | grep Pending | awk '{print $1}')
+        if [ -z "$pending" ]; then
+          echo "NONE"
+          exit 0
+        fi
+        for csr in $pending; do
+          oc adm certificate approve "$csr"
+        done
+        echo "APPROVED"
+      args:
+        executable: /bin/bash
+      register: csr_approve_poll
+      changed_when: csr_approve_poll.stdout | trim == 'APPROVED'
+      retries: 18
+      delay: 10
+      until: csr_approve_poll.stdout | trim == 'NONE'
 
-- name: Extract pending CSR names
-  ansible.builtin.set_fact:
-    pending_csrs: >-
-      {{ csr_list.stdout_lines | select('search', 'Pending') |
-         map('regex_replace', '^([^ ]+).*', '\\1') | list }}
+    - name: Display automatic CSR approval result
+      ansible.builtin.debug:
+        msg: "No more pending CSRs after polling window."
 
-- name: Display CSR status
-  ansible.builtin.debug:
-    msg: "Pending CSRs: {{ pending_csrs | default([]) }}"
+- name: Handle manual CSR approval
+  when: not auto_approve_csrs | bool
+  block:
+    - name: List CSRs for manual review
+      ansible.builtin.command: oc get csr --no-headers
+      register: csr_list
+      changed_when: false
+      failed_when: false
 
-- name: Automatically approve pending CSRs
-  ansible.builtin.command: "oc adm certificate approve {{ item }}"
-  loop: "{{ pending_csrs }}"
-  when:
-    - auto_approve_csrs | bool
-    - pending_csrs | length > 0
-  changed_when: true
+    - name: Extract pending CSR names
+      ansible.builtin.set_fact:
+        pending_csrs: >-
+          {{ csr_list.stdout_lines | select('search', 'Pending') |
+             map('regex_replace', '^([^ ]+).*', '\\1') | list }}
 
-- name: Show manual CSR approval instructions
-  ansible.builtin.debug:
-    msg:
-      - "Pending CSRs exist and auto_approve_csrs=false."
-      - "Review every CSR before approval:"
-      - "  oc get csr"
-      - "  oc describe csr <csr_name>"
-      - "Approve valid CSRs:"
-      - "  oc adm certificate approve <csr_name>"
-      - "After approval, re-run this playbook."
-  when:
-    - not auto_approve_csrs | bool
-    - pending_csrs | length > 0
-
-- name: Stop when manual CSR approval is required
-  ansible.builtin.fail:
-    msg: >-
-      Manual CSR approval required. Approve pending CSRs, then re-run
-      playbooks/restore.yml to continue finish_restore.
-  when:
-    - not auto_approve_csrs | bool
-    - pending_csrs | length > 0
+    - name: Pause for manual CSR approval
+      ansible.builtin.pause:
+        prompt: >-
+          Pending CSRs exist and auto_approve_csrs=false.
+          Review and approve CSRs in another terminal:
+            oc get csr
+            oc describe csr <csr_name>
+            oc adm certificate approve <csr_name>
+          Press Enter to continue once all CSRs are approved.
+      when: pending_csrs | length > 0

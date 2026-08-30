@@ -1,0 +1,13 @@
+---
+# Purpose: Validate OpenShift etcd restore health without forcing redeployment.
+# Dependencies: OpenShift cluster-admin access and inventory mapping for the
+# selected restore node when live etcd member URL validation is enabled.
+
+- name: Validate OpenShift etcd restore
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - role: validate_restore
+      tags:
+        - validate_restore
+        - validate

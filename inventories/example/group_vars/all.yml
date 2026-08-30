@@ -13,8 +13,16 @@ kasten_namespace: kasten-io
 etcd_namespace: openshift-etcd
 etcd_restore_namespace: etcd-restore
 
+# Keep true for the normal Kasten/Kanister workflow. Set false only when the
+# backup was already copied to restore_host_path outside of Kasten, for example
+# a CRC/SNO lab restore from /mnt/data.
+restore_require_kasten_download_prerequisites: true
+
 # Pre-existing PV/PVC used by the Kanister restore action to place the backup on
 # the selected restore node.
 restore_snapshot_file: etcd-backup.db
 restore_pv_name: pv-etcd
 restore_pvc_name: pvc-etcd
+
+# Set true for single-node OpenShift/CRC/SNO restores.
+restore_use_etcdctl_restore: false
